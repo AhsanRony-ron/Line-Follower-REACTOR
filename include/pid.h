@@ -17,23 +17,10 @@ extern int g_ROUT;
 
 const int PID_SP = 0;
 
-int32_t g_last_tick = 0;
 // ─────────────────────────────────────────
 //  KALKULASI PID
 // ─────────────────────────────────────────
 void calc_pid(uint8_t kp, uint8_t kd) {
-    g_out_p      = g_error * kp;
-    g_out_d      = (g_error - g_last_error) * kd;
-    g_last_error = g_error;
-}
-
-
-void calc_pid_tick(uint8_t kp, uint8_t kd, uint8_t tick_period) {
-    int32_t cur_tick = (abs(encoderKiriRead()) + abs(encoderKananRead())) / 2;
-
-    if (abs(cur_tick - g_last_tick) < tick_period) return;
-    g_last_tick = cur_tick;
-
     g_out_p      = g_error * kp;
     g_out_d      = (g_error - g_last_error) * kd;
     g_last_error = g_error;
@@ -50,7 +37,6 @@ void clear_pid() {
     g_out_d      = 0;
     g_LOUT       = 0;
     g_ROUT       = 0;
-    g_last_tick  = 0;  // ← reset sekalian
 }
 
 // ─────────────────────────────────────────
@@ -62,10 +48,10 @@ void mode_normal(uint8_t kecepatan, uint8_t maxpwm, uint8_t kp, uint8_t kd, Line
     if (g_sensor_out != 0) g_pv_out = input_error(g_sensor_out);
     g_error = -g_pv_out;
 
-    // calc_pid_tick(kp, kd, 4);  // test dulu tick_period=3, nanti jadiin config
     calc_pid(kp, kd);
 
     g_LOUT = constrain((int)kecepatan + g_out_p + g_out_d, -255, 255);
     g_ROUT = constrain((int)kecepatan - g_out_p - g_out_d, -255, 255);
+
     set_motors(g_LOUT, g_ROUT, maxpwm);
 }

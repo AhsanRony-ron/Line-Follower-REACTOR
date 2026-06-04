@@ -90,7 +90,6 @@ void following(uint8_t kecepatan, uint8_t kp) {
         g_pv_out = input_error(g_sensor_out);
     }
     g_error = -g_pv_out;
-    // calc_pid_tick(kp, g_config.kd, 4);
     calc_pid(kp, g_config.kd);
     g_LOUT = constrain((int)kecepatan + g_out_p + g_out_d, -255, 255);
     g_ROUT = constrain((int)kecepatan - g_out_p - g_out_d, -255, 255);
@@ -291,7 +290,6 @@ bool eksekusi_decision(CounterParam& p, bool is_mirrored, unsigned long elapsed_
                     scan_sensor();
                     if (g_sensor_out != 0) g_pv_out = input_error(g_sensor_out);
                     g_error = -g_pv_out;
-                    // calc_pid_tick(p.kp, g_config.kd, 4);
                     calc_pid(p.kp, g_config.kd);
                     g_LOUT = constrain((int)spd + g_out_p + g_out_d, -255, 255);
                     g_ROUT = constrain((int)spd - g_out_p - g_out_d, -255, 255);
@@ -308,7 +306,6 @@ bool eksekusi_decision(CounterParam& p, bool is_mirrored, unsigned long elapsed_
                     scan_sensor();
                     if (g_sensor_out != 0) g_pv_out = input_error(g_sensor_out);
                     g_error = -g_pv_out;
-                    // calc_pid_tick(p.kp, g_config.kd, 4);
                     calc_pid(p.kp, g_config.kd);
                     g_LOUT = constrain((int)p.speed2 + g_out_p + g_out_d, -255, 255);
                     g_ROUT = constrain((int)p.speed2 - g_out_p - g_out_d, -255, 255);
@@ -417,7 +414,6 @@ bool mode_counter(uint8_t cp_start) {
             bool found   = cek_flag_cond(is_mirrored);
 
             g_error = -g_pv_out;
-            // calc_pid_tick(cur.kp, g_config.kd, 4);
             calc_pid(cur.kp, g_config.kd);
 
             if (seeking && !found) {
@@ -483,7 +479,6 @@ bool mode_counter(uint8_t cp_start) {
             bool found = cek_flag_cond(is_mirrored);
 
             g_error = -g_pv_out;
-            // calc_pid_tick(nxt.kp, g_config.kd, 4);
             calc_pid(nxt.kp, g_config.kd);
 
             if (g_flag_cond != 0) {
