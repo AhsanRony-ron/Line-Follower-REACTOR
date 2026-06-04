@@ -1,0 +1,263 @@
+#pragma once
+#include <Arduino.h>
+#include "config.h"
+#include "types.h"
+
+// ─────────────────────────────────────────
+//  GLOBAL SENSOR STATE
+// ─────────────────────────────────────────
+extern uint8_t  g_sensor_raw[SENSOR_COUNT];
+extern uint8_t  g_sensor_thresh[SENSOR_COUNT];
+// extern uint8_t  g_sensor_state[SENSOR_COUNT];
+extern uint16_t g_sensor_out;   // bitmask 14-bit hasil scan
+extern uint16_t      g_pv_out;       // untuk input_error() default case
+
+// #define SENSOR_HYST_ON   -5   // mudah masuk (sensitif saat cari garis)
+// #define SENSOR_HYST_OFF  -5   // susah keluar (tahan noise saat di garis)
+
+// Invert mode (sensor terbalik)
+// param: 0=normal, 2=terbalik
+uint8_t sensor_mode = 0;
+
+// ============================================================
+// BACA ADC — via Multiplexer 2x8 channel
+// ============================================================
+
+/**
+ * Baca satu channel sensor via MUX
+ * ch 0-7  → ADC1 (PA0), ch 8-13 → ADC2 (PA1)
+ * Urutan baca di firmware: read_adc_channel(13 - i) untuk i=0..13
+ * Return: 8-bit (ADC 12-bit >> 4)
+ */
+uint8_t read_adc(uint8_t ch) {
+    if (ch < 8) {
+        digitalWrite(PIN_MUX_A, MUX_A[ch]);
+        digitalWrite(PIN_MUX_B, MUX_B[ch]);
+        digitalWrite(PIN_MUX_C, MUX_C[ch]);
+        delayMicroseconds(20);
+        return (uint8_t)(analogRead(PIN_ADC0) >> 4); // 12-bit → 8-bit
+    } else {
+        uint8_t idx = ch - 8;
+        digitalWrite(PIN_MUX_A, MUX_A[idx]);
+        digitalWrite(PIN_MUX_B, MUX_B[idx]);
+        digitalWrite(PIN_MUX_C, MUX_C[idx]);
+        delayMicroseconds(20);
+        return (uint8_t)(analogRead(PIN_ADC1) >> 4); // 12-bit → 8-bit
+    }
+}
+
+// ─────────────────────────────────────────
+//  SCAN SENSOR (untuk PID & decision)
+//  Membaca sensor, bandingkan dengan threshold,
+//  hasilkan bitmask 14-bit g_sensor_out
+//  dan posisi weighted g_sensor_pos
+//  line: LINE_AUTO / LINE_HITAM / LINE_PUTIH
+// ─────────────────────────────────────────
+
+
+uint16_t scan_sensor(LineColor line) {
+    uint16_t bitmask = 0;
+    sensor_counter   = 0;
+
+    for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
+        // Baca ADC urutan terbalik (sesuai firmware asli)
+        uint8_t val = read_adc_channel(13 - i);
+        analog_val[i] = val;
+
+        bool on_line = false;
+        switch (line) {
+            case LINE_HITAM:    on_line = val > g_sensor_thresh[i]; break;
+            case LINE_PUTIH:    on_line = val < g_sensor_thresh[i]; break;
+            case LINE_OTOMATIS: on_line = val > g_sensor_thresh[i]; break; // default hitam
+        }
+
+        if (on_line) {
+            bitmask |= (1 << i);
+            sensor_counter++;
+        }
+    }
+
+    // Mode terbalik
+    if (sensor_mode == 2) {
+        bitmask = 0x3FFF - bitmask;
+    }
+
+    out_sensor = bitmask;
+    return bitmask;
+}
+
+int input_error_thin(uint16_t s) {
+    switch (s) {
+        case 0x0001: return -24;
+        case 0x0002: return -20;
+        case 0x0003: return -22;
+        case 0x0004: return -16;
+        case 0x0006: return -18;
+        case 0x0007: return -20;
+        case 0x0008: return -12;
+        case 0x000c: return -14;
+        case 0x000e: return -16;
+        case 0x000f: return -18;
+        case 0x0010: return  -8;
+        case 0x0018: return -10;
+        case 0x001c: return -12;
+        case 0x001e: return -14;
+        case 0x0020: return  -4;
+        case 0x0030: return  -6;
+        case 0x003c: return -10;
+        case 0x0038: return  -8;
+        case 0x0040: return  -1;
+        case 0x0060: return  -2;
+        case 0x0070: return  -4;
+        case 0x0078: return  -6;
+        case 0x00c0: return   0;
+        case 0x01c0: return   0;
+        case 0x00e0: return  -1;
+        case 0x00f0: return  -2;
+        case 0x0080: return  +1;
+        case 0x0100: return  +4;
+        case 0x0180: return  +2;
+        case 0x0200: return  +8;
+        case 0x0300: return  +6;
+        case 0x0400: return +12;
+        case 0x0600: return +10;
+        case 0x0700: return  +8;
+        case 0x0780: return  +6;
+        case 0x0800: return +16;
+        case 0x0c00: return +14;
+        case 0x0e00: return +12;
+        case 0x0f00: return +10;
+        case 0x1000: return +20;
+        case 0x1800: return +18;
+        case 0x1c00: return +16;
+        case 0x1e00: return +14;
+        case 0x2000: return +24;
+        case 0x3000: return +22;
+        case 0x3800: return +20;
+        case 0x3c00: return +18;
+        default:     return (int)g_pv_out; // tidak update jika tidak cocok
+    }
+}
+
+/**
+ * MODE 2 — Garis tebal / intersection (banyak sensor aktif)
+ * steering_LUT_thick_line @ 0x08001cc0
+ */
+int input_error_thick(uint16_t s) {
+    switch (s) {
+        case 0x007f: return +20;
+        case 0x00ff: return +16;
+        case 0x01ff: return +12;
+        case 0x03ff: return  +8;
+        case 0x07ff: return  +4;
+        case 0x0fff: return  +2;
+        case 0x1fff: return  +1;
+        case 0x3fff: return   0;
+        case 0x3fc0: return -16;
+        case 0x3fe0: return -12;
+        case 0x3ff0: return  -8;
+        case 0x3ff8: return  -4;
+        case 0x3ffc: return  -2;
+        case 0x3ffe: return  -1;
+        case 0x3f80: return -20;
+        default:     return -(int)g_pv_out;
+    }
+}
+
+/**
+ * MODE 3 — Garis sisi kiri robot (7 sensor kiri aktif)
+ * steering_LUT_left_half @ 0x08001d8c
+ */
+int input_error_left(uint16_t s) {
+    switch (s) {
+        case 0x0000: return +20;
+        case 0x0001: return +16;
+        case 0x0003: return +12;
+        case 0x0007: return  +8;
+        case 0x000f: return  +4;
+        case 0x001f: return  +2;
+        case 0x003f: return  +1;
+        case 0x007f: return   0;
+        case 0x00ff: return  -1;
+        case 0x01ff: return  -2;
+        case 0x03ff: return  -4;
+        case 0x07ff: return  -8;
+        case 0x0fff: return -12;
+        case 0x1fff: return -16;
+        case 0x3fff: return -20;
+        default:     return -(int)g_pv_out;
+    }
+}
+
+/**
+ * MODE 4 — Garis sisi kanan robot (7 sensor kanan aktif)
+ * steering_LUT_right_half @ 0x08001e3c
+ */
+int input_error_right(uint16_t s) {
+    switch (s) {
+        case 0x0000: return -20;
+        case 0x2000: return -16;
+        case 0x3000: return -12;
+        case 0x3800: return  -8;
+        case 0x3c00: return  -4;
+        case 0x3e00: return  -2;
+        case 0x3f00: return  -1;
+        case 0x3f80: return   0;
+        case 0x3fc0: return  +1;
+        case 0x3fe0: return  +2;
+        case 0x3ff0: return  +8;
+        case 0x3ff8: return  +4;
+        case 0x3ffc: return +12;
+        case 0x3ffe: return +16;
+        case 0x3fff: return +20;
+        default:     return (int)g_pv_out;
+    }
+}
+
+/**
+ * Pilih LUT berdasarkan mode di pid_config
+ * Dipanggil dari update_motor_output()
+ */
+int input_error(uint16_t sensor_val) {
+    int result;
+    switch (pid_config.mode) {
+        case MODE_NORMAL:     result =  input_error_thin(sensor_val);  break;
+        case MODE_COUNTER:    result = -input_error_thick(sensor_val); break;
+        case MODE_LEFT_HALF:  result = -input_error_left(sensor_val);  break;
+        case MODE_RIGHT_HALF: result = -input_error_right(sensor_val); break;
+        default:              result =  input_error_thin(sensor_val);  break;
+    }
+    g_pv_out = (uint16_t)result;
+    return result;
+}
+
+void sensor_kalibrasi(int timer_kalibrasi) {
+    uint8_t high_val[SENSOR_COUNT];
+    uint8_t low_val[SENSOR_COUNT];
+
+    // Init nilai awal
+    for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
+        sensor_threshold[i] = 0;
+        low_val[i]           = 255;
+        high_val[i]          = 0;
+    }
+
+    int t = 0;
+    while (1) {
+        // Baca semua sensor
+        for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
+            uint8_t val = read_adc_channel(13 - i);
+            if (val < low_val[i])  low_val[i]  = val;
+            if (val > high_val[i]) high_val[i] = val;
+        }
+
+        // Hitung threshold = midpoint
+        for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
+            sensor_threshold[i] = (high_val[i] - low_val[i]) / 2 + low_val[i];
+        }
+
+        t++;
+        if (digitalRead(PIN_SW5) == LOW) break;           // sw5 = selesai manual
+        if (t > timer_kalibrasi)         break;           // timeout
+    }
+}

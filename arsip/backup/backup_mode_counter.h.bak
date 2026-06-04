@@ -1,0 +1,287 @@
+#pragma once
+#include <Arduino.h>
+#include "config.h"
+#include "types.h"
+#include "sensor.h"
+#include "motor.h"
+#include "pid.h"
+#include "display.h"
+
+// ─────────────────────────────────────────
+//  EXTERN
+// ─────────────────────────────────────────
+extern GlobalConfig     g_config;
+extern CounterParam     g_counter[COUNTER_MAX];
+extern CheckpointParam  g_checkpoint[CP_MAX];
+extern volatile int     g_timer;
+extern volatile int     g_cacah;
+extern uint8_t          g_counter_idx;
+extern int              g_LOUT;
+extern int              g_ROUT;
+extern int              g_error;
+extern int              g_last_error;
+
+// ─────────────────────────────────────────
+//  RESET TIMER
+// ─────────────────────────────────────────
+inline void reset_timer() {
+    noInterrupts();
+    g_timer = 0;
+    g_cacah = 0;
+    interrupts();
+}
+
+inline int read_timer() {
+    noInterrupts();
+    int t = g_timer;
+    interrupts();
+    return t;
+}
+
+// ─────────────────────────────────────────
+//  FOLLOWING — PID ngikuti garis
+// ─────────────────────────────────────────
+void following(uint8_t kecepatan, uint8_t kp) {
+    scan_sensor(g_config.line);
+
+    // tidak update pv_out saat sensor kosong
+    //supaya tidak terpicu error ekstrem saat robot diangkat
+    if (g_sensor_out != 0) {
+        g_pv_out = input_error(g_sensor_out);
+    }
+    g_error = -g_pv_out;
+
+    calc_pid(kp, g_config.kd);
+
+    g_LOUT = constrain((int)kecepatan - g_out_p - g_out_d, -255, 255);
+    g_ROUT = constrain((int)kecepatan + g_out_p + g_out_d, -255, 255);
+
+    set_motors(g_LOUT, g_ROUT, DEFAULT_MAX_PWM);
+}
+
+// ─────────────────────────────────────────
+//  DELAY A — Free with memory (panzer aksi 1)
+//  1. Belok selama delay_ms
+//  2. Cari garis APAPUN (tidak tunggu arah spesifik)
+//  3. Langsung update error, lanjut line following
+// ─────────────────────────────────────────
+void eksekusi_delay_a(int16_t belok_l, int16_t belok_r, uint16_t delay_ms) {
+    // fase 1: belok, ignore sensor
+    set_motors(belok_l, belok_r, DEFAULT_MAX_PWM);
+    unsigned long t_start = millis();
+    while (millis() - t_start < delay_ms) { }
+
+    // fase 2: belok sampai find sensor APAPUN → langsung update error
+    while (true) {
+        scan_sensor(g_config.line);
+        if (g_sensor_out > 0) {
+            g_pv_out = input_error(g_sensor_out);
+            break;  // ← exit segera setelah terima sensor
+        }
+        set_motors(belok_l, belok_r, DEFAULT_MAX_PWM);
+    }
+
+    // update error untuk line following berikutnya
+    if (belok_l < 0 && belok_r > 0) g_pv_out = -24;  // pivot kiri
+    if (belok_l > 0 && belok_r < 0) g_pv_out =  24;  // pivot kanan
+    g_error      = -g_pv_out;
+    g_last_error =  g_error;
+}
+
+// ─────────────────────────────────────────
+//  DELAY B — Free tanpa memory (panzer aksi 2)
+// ─────────────────────────────────────────
+void eksekusi_delay_b(int16_t belok_l, int16_t belok_r, uint16_t delay_ms) {
+    set_motors(belok_l, belok_r, DEFAULT_MAX_PWM);
+    delay(delay_ms);
+    clear_pid();
+}
+
+// ─────────────────────────────────────────
+//  EKSEKUSI DECISION
+// ─────────────────────────────────────────
+void eksekusi_decision(CounterParam& p) {
+    switch (p.decision) {
+
+        case DEC_BELOK_KIRI:
+            // kiri: motor kiri mundur, motor kanan maju
+            eksekusi_delay_a(-(int16_t)p.belok_l, (int16_t)p.belok_r, p.delay_ms);
+            break;
+
+        case DEC_BELOK_KANAN:
+            // kanan: motor kiri maju, motor kanan mundur
+            eksekusi_delay_a((int16_t)p.belok_l, -(int16_t)p.belok_r, p.delay_ms);
+            break;
+
+        case DEC_FREE:
+            set_motors(p.free_l, p.free_r, DEFAULT_MAX_PWM);
+            delay(p.delay_ms);
+            clear_pid();
+            break;
+
+        case DEC_STOP:
+            motor_stop();
+            delay(p.delay_ms);
+            motor_stop();
+            break;
+
+        // DEC_LOST tidak ada action, hanya skip
+        case DEC_LOST:
+        default:
+            break;
+    }
+}
+
+// ─────────────────────────────────────────
+//  HITUNG SPEED RAMP
+//  Linear interpolasi speed1 → speed2 selama timer
+//  Bisa naik maupun turun
+// ─────────────────────────────────────────
+inline uint8_t ramp_speed(uint8_t speed1, uint8_t speed2, int t, int timer) {
+    if (timer <= 0) return speed2;
+    if (t <= 0)     return speed1;
+    if (t >= timer) return speed2;
+    // linear interpolasi: speed1 + (speed2-speed1) * t/timer
+    int spd = (int)speed1 + ((int)speed2 - (int)speed1) * t / timer;
+    return (uint8_t)constrain(spd, 0, 255);
+}
+
+// ─────────────────────────────────────────
+//  MODE COUNTER — MAIN LOOP
+//  Panzer-like:
+//  - PID jalan terus di dalam loop utama
+//  - sensor_akumulasi OR (sensor_counter panzer)
+//  - trigger dicek setelah timer habis
+//  - C0 khusus: hanya timer + ramp speed, tanpa trigger/decision
+// ─────────────────────────────────────────
+bool mode_counter(uint8_t cp_start) {
+    unsigned long elapsed_start = millis();
+    uint8_t  start_counter = 0;
+    uint16_t start_timer   = g_config.t_blank;
+
+    // resume dari CP
+    if (cp_start > 0 && cp_start < CP_MAX) {
+        CheckpointParam& cp = g_checkpoint[cp_start - 1];
+        if (cp.counter_pos != 0xFF) {
+            start_counter = cp.counter_pos + 1;
+            start_timer   = cp.timer_cp;
+        }
+    }
+
+    // ── T-BLANK / CP TIMER ──
+    // following dengan speed_mode (kecepatan mode normal) selama t_blank
+    reset_timer();
+    while (read_timer() < start_timer) {
+        int t = read_timer();
+        led_lcd(false);  // ← mati, masih warm-up
+        led_timer((t / 5) % 2 == 1);  // ← blink timer (reversed)
+        following(g_config.speed_mode, g_config.kp);
+        display_running(
+            start_counter, read_timer(),
+            g_config.speed_mode, g_config.kp,
+            millis() - elapsed_start
+        );
+    }
+
+    // ── LOOP COUNTER SEKUENSIAL ──
+    for (uint8_t cidx = start_counter; cidx < COUNTER_MAX; cidx++) {
+        g_counter_idx = cidx;
+        CounterParam& p = g_counter[cidx];
+
+        clear_pid();
+        reset_timer();
+
+        uint16_t sensor_akumulasi = 0;
+        bool beraksi = false;
+        bool timer_sudah_habis = false;  // flag untuk reset akumulasi sekali
+
+        // ── LOOP UTAMA ──
+        while (!beraksi) {
+            int t = read_timer();
+
+            // LED indicator
+            if (cidx > 0) led_lcd(t >= p.timer);
+            else led_lcd(false);
+            led_timer((t / 5) % 2 == 1);
+
+            // hitung speed
+            uint8_t spd = (t < p.timer)
+                ? ramp_speed(p.speed1, p.speed2, t, p.timer)
+                : p.speed2;
+
+            // ── C0: langsung following, skip trigger ──
+            if (cidx == 0) {
+                following(spd, p.kp);
+                display_running(cidx, t, spd, p.kp, millis() - elapsed_start);
+                if (t >= p.timer) beraksi = true;
+                continue;
+            }
+
+            // ── SCAN SENSOR MANUAL — pisah dari following ──
+            scan_sensor(g_config.line);
+            if (g_sensor_out != 0) g_pv_out = input_error(g_sensor_out);
+            g_error = -g_pv_out;
+
+            // ── CEK TRIGGER DULU ──
+            if (t >= p.timer) {
+                if (!timer_sudah_habis) {
+                    sensor_akumulasi = 0;
+                    timer_sudah_habis = true;
+                }
+                sensor_akumulasi |= g_sensor_out;
+
+                if (p.trigger == TRIGGER_TIMER) {
+                    beraksi = true;
+                } else if (p.trigger == TRIGGER_BLANK) {
+                    if (g_sensor_out == 0) beraksi = true;
+                } else {
+                    if ((p.trigger & sensor_akumulasi) == p.trigger) beraksi = true;
+                }
+            }
+
+            // ── BARU SET MOTOR — hanya kalau belum beraksi ──
+            if (!beraksi) {
+                calc_pid(p.kp, g_config.kd);
+                g_LOUT = constrain((int)spd - g_out_p - g_out_d, -255, 255);
+                g_ROUT = constrain((int)spd + g_out_p + g_out_d, -255, 255);
+                set_motors(g_LOUT, g_ROUT, DEFAULT_MAX_PWM);
+            } else {
+                motor_stop();  // trigger aktif → stop dulu sebelum eksekusi
+            }
+
+            display_running(cidx, t, spd, p.kp, millis() - elapsed_start);
+        }
+
+        // ── EKSEKUSI DECISION ──
+        // C0 tidak punya decision → langsung lanjut ke C1
+        if (cidx == 0) continue;
+
+        // LOST tidak punya action → langsung lanjut ke counter berikutnya
+        if (p.decision == DEC_LOST) continue;
+
+        if (p.decision == DEC_STOP) {
+            motor_stop();
+            led_lcd(false);
+            led_timer(false);
+            unsigned long t_finish = millis() - elapsed_start;
+            delay(p.delay_ms);
+            display_finish(t_finish);
+            while (!sw_save() && !sw_x() && !sw_next() && !sw_back());
+            return true;
+        }
+
+        eksekusi_decision(p);
+
+        // ── LED OFF setelah action ──
+        led_lcd(false);
+        led_timer(false);
+    }
+
+    // semua counter habis tanpa STOP
+    motor_stop();
+    led_lcd(false);
+    led_timer(false);
+    display_finish(millis() - elapsed_start);
+    while (!sw_save() && !sw_x());
+    return true;
+}

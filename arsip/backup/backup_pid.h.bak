@@ -1,0 +1,69 @@
+#pragma once
+#include <Arduino.h>
+#include "config.h"
+#include "types.h"
+#include "sensor.h"      // untuk scan_sensor(), input_error(), g_sensor_out
+
+// ─────────────────────────────────────────
+//  GLOBAL PID STATE
+// ─────────────────────────────────────────
+extern int g_error;
+extern int g_last_error;
+extern int g_pv;
+extern int g_pv_out;
+extern int g_out_p;
+extern int g_out_d;
+extern int g_LOUT;
+extern int g_ROUT;
+
+const int PID_SP = 0; // setpoint selalu 0 (robot di tengah garis)
+
+// ─────────────────────────────────────────
+//  KALKULASI PID
+// ─────────────────────────────────────────
+
+void calc_pid(uint8_t kp, uint8_t kd) {
+    g_out_p    = g_error * kp;
+    g_out_d    = (g_error - g_last_error) * kd;
+    g_last_error = g_error;
+}
+
+// ─────────────────────────────────────────
+//  RESET PID
+// ─────────────────────────────────────────
+
+void clear_pid() {
+    g_error      = 0;
+    g_last_error = 0;
+    g_pv         = 0;
+    g_pv_out     = 0;
+    g_out_p      = 0;
+    g_out_d      = 0;
+    g_LOUT       = 0;
+    g_ROUT       = 0;
+}
+
+// ─────────────────────────────────────────
+//  MODE NORMAL — FOLLOWING
+//  kecepatan : base speed
+//  maxpwm    : batas PWM
+//  kp, kd    : gain PID
+//  line      : warna garis
+// ─────────────────────────────────────────
+
+void mode_normal(uint8_t kecepatan, uint8_t maxpwm, uint8_t kp, uint8_t kd, LineColor line) {
+    scan_sensor(line);
+    g_pv_out = input_error(g_sensor_out);
+    g_error  = PID_SP - g_pv_out;
+
+    calc_pid(kp, kd);
+
+    g_LOUT = (int)kecepatan - g_out_p - g_out_d;
+    g_ROUT = (int)kecepatan + g_out_p + g_out_d;
+
+    // clamp
+    g_LOUT = constrain(g_LOUT, -255, 255);
+    g_ROUT = constrain(g_ROUT, -255, 255);
+
+    set_motors(g_LOUT, g_ROUT, maxpwm);
+}

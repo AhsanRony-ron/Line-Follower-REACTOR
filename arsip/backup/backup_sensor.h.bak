@@ -1,0 +1,179 @@
+#pragma once
+#include <Arduino.h>
+#include "config.h"
+#include "types.h"
+
+// ─────────────────────────────────────────
+//  GLOBAL SENSOR STATE
+// ─────────────────────────────────────────
+extern uint8_t  g_sensor_raw[SENSOR_COUNT];
+extern uint8_t  g_sensor_thresh[SENSOR_COUNT];
+extern uint8_t  g_sensor_state[SENSOR_COUNT];
+extern uint16_t g_sensor_out;   // bitmask 14-bit hasil scan
+extern int      g_pv_out;       // untuk input_error() default case
+
+#define SENSOR_HYST_ON   -5   // mudah masuk (sensitif saat cari garis)
+#define SENSOR_HYST_OFF  -5   // susah keluar (tahan noise saat di garis)
+
+
+
+// ─────────────────────────────────────────
+//  BACA ADC DARI MULTIPLEXER
+//  ch: 0-13
+//  return: nilai 8-bit (0-255)
+// ─────────────────────────────────────────
+
+uint8_t read_adc(uint8_t ch) {
+    uint8_t idx = ch < 8 ? ch : ch - 8;
+
+    digitalWrite(PIN_MUX_A, MUX_A[idx]);
+    digitalWrite(PIN_MUX_B, MUX_B[idx]);
+    digitalWrite(PIN_MUX_C, MUX_C[idx]);
+
+    delayMicroseconds(20);
+
+    uint16_t s1 = (ch < 8) ? analogRead(PIN_ADC0)
+                           : analogRead(PIN_ADC1);
+
+    uint16_t s2 = (ch < 8) ? analogRead(PIN_ADC0)
+                           : analogRead(PIN_ADC1);
+
+    return (uint8_t)(((s1 + s2) >> 1) >> 4);
+}
+// ─────────────────────────────────────────
+//  SCAN SENSOR BAR (untuk display kalibrasi)
+//  Membaca raw ADC semua sensor, simpan ke g_sensor_raw
+// ─────────────────────────────────────────
+
+void scan_sensor_bar() {
+    for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
+        g_sensor_raw[i] = read_adc(i); 
+    }
+}
+
+// ─────────────────────────────────────────
+//  SCAN SENSOR (untuk PID & decision)
+//  Membaca sensor, bandingkan dengan threshold,
+//  hasilkan bitmask 14-bit g_sensor_out
+//  dan posisi weighted g_sensor_pos
+//  line: LINE_AUTO / LINE_HITAM / LINE_PUTIH
+// ─────────────────────────────────────────
+
+void scan_sensor(LineColor line) {
+
+    uint16_t out = 0;
+
+    for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
+
+        g_sensor_raw[i] = read_adc(i);
+
+        bool active;
+
+        if (g_sensor_state[i]) {
+            // sedang aktif → susah keluar (tahan noise)
+            active = g_sensor_raw[i] > (g_sensor_thresh[i] - SENSOR_HYST_OFF);
+        } else {
+            // sedang tidak aktif → mudah masuk (sensitif cari garis)
+            active = g_sensor_raw[i] > (g_sensor_thresh[i] - SENSOR_HYST_ON);
+        }
+        g_sensor_state[i] = active;
+
+        if (active) {
+            out |= (1 << i);
+        }
+    }
+
+    g_sensor_out = out;
+
+    if (line == LINE_PUTIH) {
+        g_sensor_out =
+            ((1 << SENSOR_COUNT) - 1) & ~out;
+    }
+}
+
+// ─────────────────────────────────────────
+//  INPUT ERROR (PID setpoint)
+//  Konversi bitmask sensor ke nilai error PID
+//  return: nilai error (-16 sampai +16)
+// ─────────────────────────────────────────
+
+int input_error(uint16_t sensor_in) {
+    // Bit order reversed: bit 0 = rightmost sensor, bit 13 = leftmost sensor
+    switch (sensor_in) {
+        // 1-2 sensor patterns (reversed bit positions)
+        case 0b10000000000000: return -16;  // sensor 13 only
+        case 0b11000000000000: return -14;  // sensors 13-12
+        case 0b01000000000000: return -13;  // sensor 12 only
+        case 0b01100000000000: return -11;  // sensors 12-11
+        case 0b00100000000000: return -10;  // sensor 11 only
+        case 0b00110000000000: return  -8;  // sensors 11-10
+        case 0b00010000000000: return  -7;  // sensor 10 only
+        case 0b00011000000000: return  -6;  // sensors 10-9
+        case 0b00001000000000: return  -5;  // sensor 9 only
+        case 0b00001100000000: return  -4;  // sensors 9-8
+        case 0b00000100000000: return  -3;  // sensor 8 only
+        case 0b00000110000000: return  -2;  // sensors 8-7
+        case 0b00000010000000: return  -1;  // sensor 7 only
+        case 0b00000011000000: return   0;  // sensors 7-6 (center)
+        case 0b00000001000000: return   1;  // sensor 6 only
+        case 0b00000001100000: return   2;  // sensors 6-5
+        case 0b00000000100000: return   3;  // sensor 5 only
+        case 0b00000000110000: return   4;  // sensors 5-4
+        case 0b00000000010000: return   5;  // sensor 4 only
+        case 0b00000000011000: return   6;  // sensors 4-3
+        case 0b00000000001000: return   7;  // sensor 3 only
+        case 0b00000000001100: return   8;  // sensors 3-2
+        case 0b00000000000100: return  10;  // sensor 2 only
+        case 0b00000000000110: return  11;  // sensors 2-1
+        case 0b00000000000010: return  13;  // sensor 1 only
+        case 0b00000000000011: return  14;  // sensors 1-0
+        case 0b00000000000001: return  16;  // sensor 0 only (rightmost)
+        
+        // 3 sensor patterns (reversed bit positions)
+        case 0b11100000000000: return  -9;  // sensors 13-11
+        case 0b01110000000000: return  -7;  // sensors 12-10
+        case 0b00111000000000: return  -5;  // sensors 11-9
+        case 0b00011100000000: return  -3;  // sensors 10-8
+        case 0b00001110000000: return  -2;  // sensors 9-7
+        case 0b00000111000000: return  -1;  // sensors 8-6
+        case 0b00000011100000: return   1;  // sensors 7-5
+        case 0b00000001110000: return   2;  // sensors 6-4
+        case 0b00000000111000: return   3;  // sensors 5-3
+        case 0b00000000011100: return   5;  // sensors 4-2
+        case 0b00000000001110: return   7;  // sensors 3-1
+        case 0b00000000000111: return   9;  // sensors 2-0 (rightmost)
+        // // kondisi khusus (perempatan, cross-line, ambiguous) → LURUS
+
+                // LOST LINE
+        case 0b00000000000000: return (g_pv_out >= 0) ? 20 : -20;
+
+        case 0b10000000000001:
+        case 0b11000000000011:
+        case 0b11100000000111:
+        case 0b11110000001111:
+        case 0b11111000011111:
+        case 0b11111100111111:
+        case 0b11111111111111:
+        case 0b01111111111110:
+        case 0b00111111111100:
+        case 0b00011111111000:
+        case 0b00001111110000:
+        case 0b10001111110001:
+        case 0b10000011000001:
+        case 0b10000010000001:
+        case 0b00100011000100:
+        case 0b00110011001100:
+        case 0b01100011000110:
+        case 0b00110001001100:
+        case 0b10000111100001:
+        case 0b10111111111101:
+        case 0b10011111111001:
+        case 0b10011100111001:
+        case 0b00000001110001:
+        case 0b00000011000001:
+        case 0b10000011000000:
+        case 0b10001110000000: return 0;  // RESET ke 0 → BELOK TAJAM
+        
+        default: return g_pv_out; // kondisi tidak terdefinisi → pertahankan
+    }
+}

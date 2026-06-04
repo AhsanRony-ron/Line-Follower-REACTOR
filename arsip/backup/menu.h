@@ -1,0 +1,852 @@
+#pragma once
+#include <Arduino.h>
+#include "config.h"
+#include "types.h"
+#include "hardware.h"
+#include "display.h"
+#include "eeprom.h"
+#include "sensor.h"
+
+// ─────────────────────────────────────────
+//  EXTERN
+// ─────────────────────────────────────────
+extern GlobalConfig     g_config;
+extern CounterParam     g_counter[COUNTER_MAX];
+extern CheckpointParam  g_checkpoint[CP_MAX];
+extern uint8_t          g_sensor_thresh[SENSOR_COUNT];
+extern volatile uint16_t g_periodo_isr;  // volatile copy dari g_config.periode untuk ISR
+
+// forward declarations
+void menu_main();
+void menu1();
+void menu2();
+void run_kalibrasi();
+void run_hcheck();
+
+// ─────────────────────────────────────────
+//  NAVIGASI HELPER
+//  wrap=true: mentok bawah lompat ke atas (dan sebaliknya)
+//  visible: jumlah baris yang tampil sekaligus
+// ─────────────────────────────────────────
+void nav_up(uint8_t& highlight, uint8_t& scroll, uint8_t count, uint8_t visible, bool wrap = true) {
+    if (highlight > 0) {
+        highlight--;
+        if (highlight < scroll) scroll--;
+    } else if (wrap) {
+        highlight = count - 1;
+        scroll = (count > visible) ? count - visible : 0;
+    }
+}
+
+void nav_down(uint8_t& highlight, uint8_t& scroll, uint8_t count, uint8_t visible, bool wrap = true) {
+    if (highlight < count - 1) {
+        highlight++;
+        if (highlight > scroll + visible - 1) scroll++;
+    } else if (wrap) {
+        highlight = 0;
+        scroll = 0;
+    }
+}
+
+
+// ─────────────────────────────────────────
+//  DEBOUNCE HELPER
+// ─────────────────────────────────────────
+void wait_release() {
+    delay(20);
+    while (sw_next() || sw_back() || sw_up() || sw_down() || sw_save() || sw_x());
+    delay(20);
+}
+
+// ─────────────────────────────────────────
+// BUTTON AUTO REPEAT
+// ─────────────────────────────────────────
+
+bool button_repeat(bool state,
+                   uint32_t& last_time,
+                   bool& hold_state,
+                   uint16_t first_delay = 300,
+                   uint16_t repeat_delay = 30)
+{
+    uint32_t now = millis();
+
+    if (state && !hold_state) {
+        // tombol baru ditekan → trigger langsung
+        hold_state = true;
+        last_time  = now;
+        return true;
+    }
+
+    if (state && hold_state) {
+        // tombol ditahan → tunggu first_delay, lalu repeat setiap repeat_delay
+        if (now - last_time >= first_delay) {
+            last_time = now - (first_delay - repeat_delay);
+            return true;
+        }
+    }
+
+    if (!state) {
+        hold_state = false;
+    }
+
+    return false;
+}
+
+bool btn_up() {
+    static uint32_t t = 0;
+    static bool hold = false;
+    return button_repeat(sw_up(), t, hold);
+}
+
+bool btn_down() {
+    static uint32_t t = 0;
+    static bool hold = false;
+    return button_repeat(sw_down(), t, hold);
+}
+
+bool btn_next() {
+    static uint32_t t = 0;
+    static bool hold = false;
+    return button_repeat(sw_next(), t, hold);
+}
+
+bool btn_back() {
+    static uint32_t t = 0;
+    static bool hold = false;
+    return button_repeat(sw_back(), t, hold);
+}
+
+bool btn_save() {
+    static bool last = false;
+
+    bool now = sw_save();
+
+    if (now && !last) {
+        last = true;
+        return true;
+    }
+
+    if (!now)
+        last = false;
+
+    return false;
+}
+
+bool btn_x() {
+    static bool last = false;
+
+    bool now = sw_x();
+
+    if (now && !last) {
+        last = true;
+        return true;
+    }
+
+    if (!now)
+        last = false;
+
+    return false;
+}
+
+// ─────────────────────────────────────────
+//  LAYAR STANDBY
+//  return: index CP yang dipilih (0 = mulai dari awal)
+// ─────────────────────────────────────────
+uint8_t screen_standby() {
+    uint8_t cp_sel = 0;
+    unsigned long last_disp = 0;
+
+    // flush semua tombol saat masuk standby
+    wait_release();
+
+    while (true) {
+        // throttle display 100ms — biar tombol responsif
+        unsigned long now = millis();
+        if (now - last_disp >= 100) {
+            scan_sensor_bar();
+            float volt = read_voltage();
+            display_standby(cp_sel, volt, g_config.mem_slot);
+            last_disp = now;
+        }
+
+        if (btn_up()) {
+            if (cp_sel < CP_MAX - 1) cp_sel++;
+        }
+        if (btn_down()) {
+            if (cp_sel > 0) cp_sel--;
+        }
+
+        // SAVE = START
+        if (btn_save()) {
+            wait_release();   // flush agar tidak langsung stop di mode running
+            return cp_sel;
+        }
+
+        // X = kalibrasi sensor
+        if (btn_x()) {
+            run_kalibrasi();
+            wait_release();
+        }
+
+        // NEXT = Menu 1 (Config)
+        if (btn_next()) {
+            menu1();
+            wait_release();
+        }
+
+        // BACK = Menu 2 (Counter)
+        if (btn_back()) {
+            menu2();
+            wait_release();
+        }
+    }
+}
+
+// ─────────────────────────────────────────
+//  KALIBRASI SENSOR
+// ─────────────────────────────────────────
+void run_kalibrasi() {
+    uint8_t high[SENSOR_COUNT] = {0};
+    uint8_t low[SENSOR_COUNT];
+    memset(low, 255, sizeof(low));
+
+    while (true) {
+        for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
+            uint8_t val = read_adc(i);  // sensor 0 = rightmost, sensor 13 = leftmost
+            g_sensor_raw[i] = val;
+            if (val < low[i])  low[i]  = val;
+            if (val > high[i]) high[i] = val;
+            g_sensor_thresh[i] = (high[i] - low[i]) / 2 + low[i];
+        }
+
+        display_kalibrasi(high, low);
+
+        if (btn_save()) {
+            eeprom_save_sensor(g_config.mem_slot);
+            display_msg("Saved!", "Calibration OK");
+            delay(1000);
+            return;
+        }
+    }
+}
+
+// ─────────────────────────────────────────
+//  HCHECK — TEST MOTOR
+// ─────────────────────────────────────────
+void run_hcheck() {
+    display_msg("Hcheck", "SAVE:maju X:stop");
+    delay(500);
+
+    while (true) {
+        if (btn_save()) {
+            set_motors(100, 100, DEFAULT_MAX_PWM, 0, 0);
+            display_msg("Hcheck", "MAJU...");
+        }
+        if (btn_x()) {
+            motor_stop();
+            display_msg("Hcheck", "STOP");
+            delay(500);
+            return;
+        }
+        if (btn_up())   { set_motors(150,  150, DEFAULT_MAX_PWM, 0, 0); }
+        if (btn_down()) { set_motors(-100, -100, DEFAULT_MAX_PWM, 0, 0); }
+        if (btn_next()) { set_motors(100, -100, DEFAULT_MAX_PWM, 0, 0); display_msg("Hcheck","Putar KA"); }
+        if (btn_back()) { set_motors(-100, 100, DEFAULT_MAX_PWM, 0, 0); display_msg("Hcheck","Putar KI"); }
+    }
+}
+
+// ─────────────────────────────────────────
+//  KONFIRMASI GENERIC
+//  return true jika SAVE, false jika X
+// ─────────────────────────────────────────
+bool confirm(const char* msg) {
+    display_confirm(msg);
+    while (true) {
+        if (btn_save()) return true;
+        if (btn_x())    return false;
+    }
+}
+
+// ─────────────────────────────────────────
+//  EDIT NILAI GENERIC
+//  Naik/turun dengan up/down, keluar dengan X
+//  min_val / max_val: batas nilai
+// ─────────────────────────────────────────
+template<typename T>
+void edit_value(T& val, T step, T min_val, T max_val) {
+    if (btn_next()) {
+        val += step;
+        if (val > max_val) val = min_val;  // wrap around to min
+    }
+    if (btn_back()) {
+        // Cek batas SEBELUM operasi untuk mencegah wrap around hardware
+        if (val > min_val) {
+            if (val - step < min_val) {
+                val = min_val;
+            } else {
+                val -= step;
+            }
+        } else if (val == min_val) {
+            val = max_val;  // wrap around to max
+        }
+    }
+}
+
+// ─────────────────────────────────────────
+//  ENCODE / DECODE TRIGGER
+//  Trigger bisa: L1-L5, R1-R5, LR1-LR5, Blank, Timer
+//  Dengan bit order reversed:
+//    bit 0-4   = R5-R1 (sensor 0-4, rightmost to right-inner)
+//    bit 9-13  = L1-L5 (sensor 9-13, left-inner to leftmost)
+// ─────────────────────────────────────────
+
+// list trigger yang bisa dipilih user (urut)
+// index 0-4   = L1-L5 (left side)
+// index 5-9   = R1-R5 (right side)
+// index 10-14 = LR1-LR5 (both sides)
+// index 15    = Blank
+// index 16    = Timer
+#define TRIGGER_LIST_COUNT 17
+
+static const uint16_t TRIGGER_LIST[TRIGGER_LIST_COUNT] = {
+    // L1-L5: bit 9-13 (sensor 9-13, left side)
+    (1 << 9), (1 << 10), (1 << 11), (1 << 12), (1 << 13),
+    // R1-R5: bit 4-0 (sensor 4-0, right side)
+    (1 << 4), (1 << 3), (1 << 2), (1 << 1), (1 << 0),
+    // LR1-LR5: bit kiri + kanan bersamaan
+    (1 << 9) | (1 << 4),
+    (1 << 10) | (1 << 3),
+    (1 << 11) | (1 << 2),
+    (1 << 12) | (1 << 1),
+    (1 << 13) | (1 << 0),
+    // Blank & Timer
+    TRIGGER_BLANK,
+    TRIGGER_TIMER
+};
+
+const char* TRIGGER_NAMES[TRIGGER_LIST_COUNT] = {
+    "L1","L2","L3","L4","L5",
+    "R1","R2","R3","R4","R5",
+    "LR1","LR2","LR3","LR4","LR5",
+    "Blank","Timer"
+};
+
+uint8_t trigger_to_idx(uint16_t trigger) {
+    for (uint8_t i = 0; i < TRIGGER_LIST_COUNT; i++) {
+        if (TRIGGER_LIST[i] == trigger) return i;
+    }
+    return TRIGGER_LIST_COUNT - 1;
+}
+
+// konversi trigger value ke nama string
+inline const char* trigger_name(uint16_t trigger) {
+    return TRIGGER_NAMES[trigger_to_idx(trigger)];
+}
+
+// ─────────────────────────────────────────
+//  MENU COUNTER — EDIT SATU COUNTER
+// ─────────────────────────────────────────
+void menu_counter_edit(uint8_t cidx) {
+    uint8_t scroll    = 0;
+    uint8_t highlight = 0;
+    uint8_t edit_sub  = 0;
+
+    // lookup index item C0: 0→Timer(1), 1→Speed(2), 2→Kp(4)
+    const uint8_t c0_map[] = {1, 2, 4};
+
+    while (true) {
+        CounterParam& p = g_counter[cidx];
+        bool is_c0 = (cidx == 0);
+
+        // C0: hanya 3 item (Timer, Speed, Kp)
+        // C1+: normal 6 atau 7 item
+        uint8_t max_item = is_c0 ? 3 : ((p.decision == DEC_FREE) ? 7 : 6);
+
+        if (highlight > max_item) highlight = max_item;
+
+        display_counter(cidx, scroll, highlight, p, true, edit_sub);
+
+        // ── UP ──
+        if (btn_up()) {
+            if (highlight == 0) {
+                if (cidx > 0) {scroll = 0; highlight = 0; edit_sub = 0; }
+            } else if (highlight == 1) {
+                highlight = 0;
+                edit_sub  = 0;
+            } else {
+                highlight--;
+                if (highlight - 1 < scroll) scroll = highlight - 1;
+                edit_sub = 0;
+            }
+        }
+
+        // ── DOWN ──
+        if (btn_down()) {
+            if (highlight == 0) {
+                highlight = 1;
+                scroll    = 0;
+                edit_sub  = 0;
+            } else if (highlight < max_item) {
+                highlight++;
+                if (highlight - 1 >= scroll + 5) scroll = highlight - 5;
+                edit_sub = 0;
+            }
+        }
+
+        // ── X: toggle edit_sub ──
+        if (btn_x()) {
+            if (is_c0) {
+                // C0: hanya Speed (highlight==2) yang punya sub
+                edit_sub = (highlight == 2) ? !edit_sub : 0;
+            } else {
+                switch (highlight) {
+                    case 0: case 2: case 5:  // C, Timer, Kp: tidak ada sub
+                        edit_sub = 0;
+                        break;
+                    default:
+                        edit_sub = !edit_sub;
+                        break;
+                }
+            }
+        }
+
+        // ── NEXT/BACK: ubah nilai ──
+        if (highlight == 0) {
+            if (btn_next()) {
+                if (cidx < COUNTER_MAX - 1) { cidx++; scroll = 0; highlight = 0; edit_sub = 0; }
+            }
+            if (btn_back()) {
+                if (cidx > 0) { cidx--; scroll = 0; highlight = 0; edit_sub = 0; }
+            }
+        } else {
+            // konversi highlight ke item index
+            // C0: pakai c0_map, C1+: langsung highlight-1
+            uint8_t item = is_c0 ? c0_map[highlight - 1] : (highlight - 1);
+
+            switch (item) {
+                case 0: // Decision & Trigger (C1+ only)
+                    if (edit_sub == 0) {
+                        if (btn_next()) {
+                            uint8_t d = (uint8_t)p.decision;
+                            if (d > 3) {d = 0;}
+                            p.decision = (Decision)(d + 1);
+                        }
+                        if (btn_back()) {
+                            uint8_t d = (uint8_t)p.decision;
+                            if (d == 0) {d = 4;}
+                            p.decision = (Decision)(d - 1);
+
+                        }
+                    } else {
+                        uint8_t tidx = trigger_to_idx(p.trigger);
+                        if (btn_next()) { if (tidx < TRIGGER_LIST_COUNT - 1) tidx++; else tidx = 0; }
+                        if (btn_back()) { if (tidx > 0) tidx--; else tidx = TRIGGER_LIST_COUNT - 1; }
+                        p.trigger = TRIGGER_LIST[tidx];
+                    }
+                    break;
+
+                case 1: // Timer
+                    if (btn_next()) { if (p.timer < 1000) p.timer++; }
+                    if (btn_back()) { if (p.timer > 0)    p.timer--; }
+                    break;
+
+                case 2: // Speed1 & Speed2
+                    if (edit_sub == 0) {
+                        if (btn_next()) { if (p.speed1 < 255) p.speed1++; }
+                        if (btn_back()) { if (p.speed1 > 0)   p.speed1--; }
+                    } else {
+                        if (btn_next()) { if (p.speed2 < 255) p.speed2++; }
+                        if (btn_back()) { if (p.speed2 > 0)   p.speed2--; }
+                    }
+                    break;
+
+                case 3: // Delay type & durasi (C1+ only)
+                    if (edit_sub == 0) {
+                        if (btn_next() || btn_back()) {
+                            p.delay_type = (p.delay_type == DELAY_A) ? DELAY_B : DELAY_A;
+                        }
+                    } else {
+                        if (btn_next()) { if (p.delay_ms < 10000) p.delay_ms += 10; }
+                        if (btn_back()) { if (p.delay_ms >= 10)   p.delay_ms -= 10; }
+                    }
+                    break;
+
+                case 4: // Kp
+                    if (btn_next()) { if (p.kp < 255) p.kp++; }
+                    if (btn_back()) { if (p.kp > 0)   p.kp--; }
+                    break;
+
+                case 5: // Belok PWM L & R (C1+ only)
+                    if (edit_sub == 0) {
+                        if (btn_next()) { if (p.belok_l < 255)  p.belok_l += 5; }
+                        if (btn_back()) { if (p.belok_l > -255) p.belok_l -= 5; }
+                    } else {
+                        if (btn_next()) { if (p.belok_r < 255)  p.belok_r += 5; }
+                        if (btn_back()) { if (p.belok_r > -255) p.belok_r -= 5; }
+                    }
+                    break;
+
+                case 6: // Free PWM L & R (C1+ only)
+                    if (edit_sub == 0) {
+                        if (btn_next()) { if (p.free_l < 255)  p.free_l += 5; }
+                        if (btn_back()) { if (p.free_l > -255) p.free_l -= 5; }
+                    } else {
+                        if (btn_next()) { if (p.free_r < 255)  p.free_r += 5; }
+                        if (btn_back()) { if (p.free_r > -255) p.free_r -= 5; }
+                    }
+                    break;
+            }
+        }
+
+        // ── SAVE ──
+        if (btn_save()) {
+            eeprom_save_counter(g_config.mem_slot);
+            display_msg("Saved!");
+            delay(800);
+            return;
+        }
+    }
+}
+
+// ─────────────────────────────────────────
+//  MENU COUNTER — PILIH COUNTER
+// ─────────────────────────────────────────
+void menu_counter() {
+    menu_counter_edit(0);
+}
+
+// ─────────────────────────────────────────
+//  MENU CHECKPOINT
+// ─────────────────────────────────────────
+void menu_checkpoint() {
+    uint8_t scroll    = 0;
+    uint8_t highlight = 0;
+    bool    edit_mode = false;
+    uint8_t edit_sub  = 0;
+
+    while (true) {
+        // tampilkan list CP
+        lcd.clearDisplay();
+        for (uint8_t i = 0; i < 3; i++) {
+            uint8_t idx = scroll + i;
+            if (idx >= CP_MAX) break;
+            bool active = (idx == highlight);
+            disp_highlight(i + 1, active);
+            char buf[22];
+            if (g_checkpoint[idx].counter_pos == 0xFF) {
+                snprintf(buf, sizeof(buf), "CP%d: -", idx);
+            } else {
+                snprintf(buf, sizeof(buf), "CP%d: C%02d T:%d",
+                    idx,
+                    g_checkpoint[idx].counter_pos,
+                    g_checkpoint[idx].timer_cp);
+            }
+            lcd.setCursor(0, ROW(i + 1));
+            lcd.print(buf);
+            disp_color_reset();
+        }
+        disp_text(0, 0, "CheckPoint");
+        lcd.display();
+
+        if (!edit_mode) {
+            if (btn_up()) {
+                
+                nav_up(highlight, scroll, CP_MAX, 3);
+                
+            }
+            if (btn_down()) nav_down(highlight, scroll, CP_MAX, 3);
+            if (btn_x())    { edit_mode = true; edit_sub = 0; }
+            if (btn_save()) {
+                eeprom_save_cp(g_config.mem_slot);
+                display_msg("Saved!");
+                delay(800);
+                return;
+            }
+            if (btn_back()) return;
+        } else {
+            CheckpointParam& cp = g_checkpoint[highlight];
+            if (edit_sub == 0) {
+                // edit counter_pos (0xFF = nonaktif)
+                if (btn_up()) {
+                    if (cp.counter_pos == 0xFF) cp.counter_pos = 0;
+                    else if (cp.counter_pos < COUNTER_MAX - 1) cp.counter_pos++;
+                }
+                if (btn_down()) {
+                    if (cp.counter_pos == 0) cp.counter_pos = 0xFF;
+                    else if (cp.counter_pos != 0xFF) cp.counter_pos--;
+                }
+            } else {
+                // edit timer_cp
+                edit_value(cp.timer_cp, (uint16_t)1, (uint16_t)0, (uint16_t)1000);
+            }
+            if (btn_next() || btn_back()) edit_sub = !edit_sub;
+            if (btn_x()) { edit_mode = false; edit_sub = 0; }
+            if (btn_save()) {
+                eeprom_save_cp(g_config.mem_slot);
+                display_msg("Saved!");
+                delay(800);
+                return;
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────
+//  MENU COPY MEM
+// ─────────────────────────────────────────
+void menu_copy_mem() {
+    uint8_t dst = (g_config.mem_slot + 1) % EEPROM_SLOT_COUNT;
+
+    while (true) {
+        lcd.clearDisplay();
+        disp_text(0, 0, "Copy Memory Slot");
+        lcd.setCursor(0, ROW(1));
+        lcd.print("Src:"); lcd.print(g_config.mem_slot);
+        lcd.print(" -> Dst:"); lcd.print(dst);
+        disp_text(0, 2, "up/dn:ganti tujuan");
+        disp_text(0, 3, "SAVE:ok  X:batal");
+        lcd.display();
+
+        if (btn_up())   { if (dst < EEPROM_SLOT_COUNT - 1) dst++; }
+        if (btn_down()) { if (dst > 0) dst--; }
+        if (btn_save()) {
+            if (dst != g_config.mem_slot) {
+                display_msg("Copying...", "Please wait");
+                eeprom_copy_slot(g_config.mem_slot, dst);
+                display_msg("Copy Done!");
+                delay(1000);
+            }
+            return;
+        }
+        if (btn_x()) return;
+    }
+}
+
+// ─────────────────────────────────────────
+//  MENU 1 — KONFIGURASI GLOBAL
+// ─────────────────────────────────────────
+void menu1() {
+    uint8_t scroll    = 0;
+    uint8_t highlight = 0;
+    uint8_t edit_sub  = 0;  // untuk parameter 2-sub: 0=kiri, 1=kanan
+    uint8_t old_mem_slot = g_config.mem_slot;  // ✅ SIMPAN slot lama
+
+    while (true) {
+        display_menu1(scroll, highlight, g_config, edit_sub);
+
+        // Navigation: Up/Down only untuk pindah item
+        if (btn_up()) {
+            nav_up(highlight, scroll, MENU1_COUNT, 6);
+            edit_sub = 0;  // reset edit_sub saat navigasi
+        }
+        if (btn_down()) {
+            nav_down(highlight, scroll, MENU1_COUNT, 6);
+            edit_sub = 0;
+        }
+
+        // X: Toggle sub-item atau action
+        if (btn_x()) {
+            if (highlight == 7) { run_hcheck(); continue; }
+            if (highlight == 9) { run_kalibrasi(); continue; }
+            if (highlight == 2) { edit_sub = !edit_sub; }  // PID: toggle Kp/Kd
+        }
+
+        // Save config dan exit
+        if (btn_save()) {
+            pwm_init(g_config.pwm_freq_khz);
+            uint8_t new_slot = g_config.mem_slot;
+
+            if (new_slot != old_mem_slot) {
+                // Slot berubah:
+                // 1. Simpan semua perubahan ke slot LAMA dulu
+                g_config.mem_slot = old_mem_slot;
+                eeprom_save_all(old_mem_slot);
+
+                // 2. Catat slot aktif baru
+                eeprom_save_active_slot(new_slot);
+
+                // 3. Load semua dari slot baru
+                display_msg("Loading...", "Mem Slot");
+                eeprom_load_all(new_slot);
+                g_config.mem_slot = new_slot;  // paksa karena load bisa overwrite
+                g_periodo_isr = g_config.periode;  // Sync volatile copy setelah load
+
+                display_msg("Slot changed!");
+                delay(800);
+            } else {
+                // Slot sama — simpan semua ke slot aktif
+                eeprom_save_all(g_config.mem_slot);
+                display_msg("Saved!", "Config OK");
+                delay(800);
+            }
+            return;
+        }
+
+        // Edit nilai dengan Next/Back
+        switch (highlight) {
+            case 0: // Mode
+                if (btn_next() || btn_back()) {
+                    g_config.mode = (g_config.mode == MODE_NORMAL) ? MODE_COUNTER : MODE_NORMAL;
+                }
+                break;
+
+            case 1: // Speed
+                if (btn_next()) {
+                    g_config.speed_mode += 1;
+                    if (g_config.speed_mode > 255) g_config.speed_mode = 255;
+                }
+                if (btn_back()) {
+                    if (g_config.speed_mode > 0) g_config.speed_mode -= 1;
+                }
+                break;
+
+            case 2: // PID Kp & Kd
+                if (edit_sub == 0) {
+                    // Edit Kp
+                    if (btn_next()) {
+                        g_config.kp += 1;
+                        if (g_config.kp > 255) g_config.kp = 255;
+                    }
+                    if (btn_back()) {
+                        if (g_config.kp > 0) g_config.kp -= 1;
+                    }
+                } else {
+                    // Edit Kd
+                    if (btn_next()) {
+                        g_config.kd += 1;
+                        if (g_config.kd > 255) g_config.kd = 255;
+                    }
+                    if (btn_back()) {
+                        if (g_config.kd > 0) g_config.kd -= 1;
+                    }
+                }
+                break;
+
+            case 3: // Line
+                if (btn_next()) {
+                    uint8_t l = (uint8_t)g_config.line;
+                    if (l < 2) g_config.line = (LineColor)(l + 1);
+                }
+                if (btn_back()) {
+                    uint8_t l = (uint8_t)g_config.line;
+                    if (l > 0) g_config.line = (LineColor)(l - 1);
+                }
+                break;
+
+            case 4: // Periode
+                if (btn_next()) {
+                    g_config.periode += 1;
+                    if (g_config.periode > 9999) g_config.periode = 9999;
+                    g_periodo_isr = g_config.periode;  // Sync volatile copy untuk ISR
+                }
+                if (btn_back()) {
+                    if (g_config.periode > 1) g_config.periode -= 1;
+                    g_periodo_isr = g_config.periode;  // Sync volatile copy untuk ISR
+                }
+                break;
+
+            case 5: // T-Blank
+                if (btn_next()) {
+                    g_config.t_blank += 1;
+                    if (g_config.t_blank > 9999) g_config.t_blank = 9999;
+                }
+                if (btn_back()) {
+                    if (g_config.t_blank > 0) g_config.t_blank -= 1;
+                }
+                break;
+
+            case 6: // PWM Freq
+                if (btn_next()) {
+                    g_config.pwm_freq_khz += 0.1f;
+                    if (g_config.pwm_freq_khz > PWM_FREQ_MAX) g_config.pwm_freq_khz = PWM_FREQ_MAX;
+                }
+                if (btn_back()) {
+                    g_config.pwm_freq_khz -= 0.1f;
+                    if (g_config.pwm_freq_khz < PWM_FREQ_MIN) g_config.pwm_freq_khz = PWM_FREQ_MIN;
+                }
+                break;
+
+            case 8: // Mem Slot
+                if (btn_next()) {
+                    if (g_config.mem_slot < EEPROM_SLOT_COUNT - 1) g_config.mem_slot++;
+                }
+                if (btn_back()) {
+                    if (g_config.mem_slot > 0) g_config.mem_slot--;
+                }
+                break;
+        }
+    }
+}
+
+// ─────────────────────────────────────────
+//  MENU 2 — PILIHAN UTAMA
+// ─────────────────────────────────────────
+void menu2() {
+    uint8_t scroll    = 0;
+    uint8_t highlight = 0;
+
+    while (true) {
+        display_menu2(scroll, highlight);
+
+        if (btn_up()) {
+            
+            nav_up(highlight, scroll, MENU2_COUNT, 6);
+            
+        }
+        if (btn_down()) nav_down(highlight, scroll, MENU2_COUNT, 6);
+        if (btn_x() || btn_next()) {
+            switch (highlight) {
+                case 0: menu_counter();   break;
+                case 1: menu_checkpoint(); break;
+                case 2: menu_copy_mem();  break;
+                case 3:
+                    if (confirm("Delete slot?")) {
+                        display_msg("Deleting...", "Please wait");
+                        eeprom_delete_slot(g_config.mem_slot);
+                        load_defaults();
+                        eeprom_save_all(g_config.mem_slot);
+                        display_msg("Deleted!", "Done");
+                        delay(1000);
+                    }
+                    break;
+                case 4:
+                    if (confirm("Reset ALL?")) {
+                        display_msg("Resetting...", "Please wait");
+                        eeprom_write_defaults_all_slots();
+                        eeprom_save_active_slot(0);
+                        display_msg("Reset!", "All cleared");
+                        delay(1000);
+                        system_restart();
+                    }
+                    break;
+            }
+        }
+        if (btn_save()) return;
+    }
+}
+
+// ─────────────────────────────────────────
+//  MENU MAIN — ROUTER
+//  next/back dari standby masuk sini
+// ─────────────────────────────────────────
+void menu_main() {
+    uint8_t sel = 0; // 0 = Menu1, 1 = Menu2
+
+    while (true) {
+        lcd.clearDisplay();
+        disp_highlight(0, sel == 0);
+        disp_text(0, 0, "Menu 1: Config");
+        disp_color_reset();
+        disp_highlight(1, sel == 1);
+        disp_text(0, 1, "Menu 2: Counter");
+        disp_color_reset();
+        lcd.display();
+
+        if (btn_up() || btn_down()) sel = !sel;
+        if (btn_x()) {
+            if (sel == 0) menu1();
+            else          menu2();
+        }
+        if (btn_back() || btn_save()) return;
+    }
+}
