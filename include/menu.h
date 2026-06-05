@@ -175,7 +175,7 @@ uint8_t screen_standby() {
         }
 
         if (btn_up()) {
-            if (cp_sel < CP_MAX - 1) cp_sel++;
+            if (cp_sel < CP_MAX) cp_sel++; 
         }
         if (btn_down()) {
             if (cp_sel > 0) cp_sel--;

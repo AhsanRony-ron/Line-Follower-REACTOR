@@ -162,13 +162,19 @@ void display_standby(uint8_t cp_idx, float voltage, uint8_t mem_slot = 0, Global
     // Baris 0: CP aktif + counter berikutnya dari checkpoint
     u8g2.setCursor(0, ROW(0));
     u8g2.print("CP:");
-    uint8_t cp_no = cp_idx + 1;
-    if (cp_no < 10) u8g2.print('0');
-    u8g2.print(cp_no);
+    uint8_t cp_sel = cp_idx;
+    if (cp_sel == 0) {
+        u8g2.print("00");
+    } else {
+        if (cp_sel < 10) u8g2.print('0');
+        u8g2.print(cp_sel);
+    }
 
     u8g2.print(" N:");
-    if (cp_idx < CP_MAX) {
-        const CheckpointParam& cp = g_checkpoint[cp_idx];
+    if (cp_sel == 0) {
+        u8g2.print("C00");
+    } else {
+        const CheckpointParam& cp = g_checkpoint[cp_sel  - 1];
         if (cp.counter_pos == 0xFF) {
             u8g2.print("C00");
         } else {
@@ -177,8 +183,6 @@ void display_standby(uint8_t cp_idx, float voltage, uint8_t mem_slot = 0, Global
             if (next_counter < 10) u8g2.print('0');
             u8g2.print(next_counter);
         }
-    } else {
-        u8g2.print("C00");
     }
     disp_textf(13, 0, cfg.mode == MODE_NORMAL ? "NORMAL" : "COUNTER");
     disp_textf(0, 1, "Slot:%d", mem_slot);
@@ -567,7 +571,7 @@ void display_checkpoint(uint8_t scroll, uint8_t highlight, uint8_t edit_sub = 0)
         u8g2.setCursor(0, ROW(i + 1));
         u8g2.print("CP");
         if (idx < 10) u8g2.print('0');
-        u8g2.print(idx);
+        u8g2.print(idx + 1);
         u8g2.print(": ");
 
         CheckpointParam& cp = g_checkpoint[idx];
@@ -578,7 +582,7 @@ void display_checkpoint(uint8_t scroll, uint8_t highlight, uint8_t edit_sub = 0)
             u8g2.print("--");
         } else {
             if (cp.counter_pos < 10) u8g2.print('0');
-            u8g2.print(cp.counter_pos);
+            u8g2.print(cp.counter_pos + 1);
         }
         if (active && edit_sub == 0) u8g2.print(']');
 

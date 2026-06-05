@@ -343,10 +343,11 @@ bool mode_counter(uint8_t cp_start) {
     uint16_t start_timer   = g_config.t_blank;
 
     // resume dari CP terpilih
-    if (cp_start < CP_MAX) {
-        CheckpointParam& cp = g_checkpoint[cp_start];
+    if (cp_start > 0) {
+        uint8_t cp_idx = cp_start - 1;
+        CheckpointParam& cp = g_checkpoint[cp_idx];
         if (cp.counter_pos != 0xFF) {
-            start_counter = cp.counter_pos + 1;
+            start_counter = cp.counter_pos;
             start_timer   = cp.timer_cp;
         }
     }
