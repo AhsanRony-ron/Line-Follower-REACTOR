@@ -27,11 +27,11 @@ void set_motors(int lpwm, int rpwm, uint8_t maxpwm) {
         analogWrite(PIN_LPWM1, 0);
         analogWrite(PIN_LPWM2, 0);
     } else if (lpwm > 0) {
-        analogWrite(PIN_LPWM2, 0);
-        analogWrite(PIN_LPWM1, lpwm);
-    } else {
-        analogWrite(PIN_LPWM2, -lpwm);
         analogWrite(PIN_LPWM1, 0);
+        analogWrite(PIN_LPWM2, lpwm);
+    } else {
+        analogWrite(PIN_LPWM1, -lpwm);
+        analogWrite(PIN_LPWM2, 0);
     }
 
     // motor kanan
@@ -39,11 +39,11 @@ void set_motors(int lpwm, int rpwm, uint8_t maxpwm) {
         analogWrite(PIN_RPWM1, 0);
         analogWrite(PIN_RPWM2, 0);
     } else if (rpwm > 0) {
-        analogWrite(PIN_RPWM2, rpwm);
-        analogWrite(PIN_RPWM1, 0);
-    } else {
+        analogWrite(PIN_RPWM1, rpwm);
         analogWrite(PIN_RPWM2, 0);
-        analogWrite(PIN_RPWM1, -rpwm);
+    } else {
+        analogWrite(PIN_RPWM1, 0);
+        analogWrite(PIN_RPWM2, -rpwm);
     }
 }
 

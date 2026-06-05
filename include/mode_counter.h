@@ -20,7 +20,6 @@ extern int              g_LOUT;
 extern int              g_ROUT;
 extern int              g_error;
 extern int              g_last_error;
-extern uint8_t          sensor_inverted;
 
 // ─────────────────────────────────────────
 //  FLAG COND — adopt dari panzer
@@ -141,19 +140,13 @@ inline void set_motor_seek(int16_t belok_l, int16_t belok_r) {
 //  1. Set motor belok selama delay_ms
 //  2. Set flag_cond → seek dilanjutkan di loop utama
 // ─────────────────────────────────────────
-void eksekusi_belok(int16_t belok_l, int16_t belok_r,
-                    uint16_t delay_ms, bool is_mirrored) {
-    if (is_mirrored) {
-        set_motors(-belok_l, -belok_r, DEFAULT_MAX_PWM);
-    } else {
-        set_motors(belok_l, belok_r, DEFAULT_MAX_PWM);
-    }
+void eksekusi_belok(int16_t actual_l, int16_t actual_r, uint16_t delay_ms) {
+    set_motors(actual_l, actual_r, DEFAULT_MAX_PWM);
     delay(delay_ms);
 
-    // set flag_cond sesuai arah belok
-    if      (belok_l > 0 && belok_r < 0) g_flag_cond = 1;  // seek kiri
-    else if (belok_l < 0 && belok_r > 0) g_flag_cond = 2;  // seek kanan
-    else                                  g_flag_cond = 0;  // lurus
+    if      (actual_l > 0 && actual_r < 0) g_flag_cond = 1; // belok kanan → seek kiri
+    else if (actual_l < 0 && actual_r > 0) g_flag_cond = 2; // belok kiri  → seek kanan
+    else                                    g_flag_cond = 0;
 }
 
 // ─────────────────────────────────────────
@@ -228,25 +221,28 @@ bool eksekusi_decision(CounterParam& p, bool is_mirrored, unsigned long elapsed_
             // Do Noting
             break;
 
-        case DEC_BELOK_KIRI:
-            if (p.delay_type == DELAY_A) {
-                eksekusi_belok(-(int16_t)p.belok_l, (int16_t)p.belok_r,
-                               p.delay_ms, is_mirrored);
-            } else {
-                eksekusi_delay_b(-(int16_t)p.belok_l, (int16_t)p.belok_r,
-                                 p.delay_ms, is_mirrored, p.Encd_l, p.Encd_r);
+        case DEC_BELOK_KANAN: {
+            int16_t l =  (int16_t)p.belok_l;
+            int16_t r = -(int16_t)p.belok_r;
+            if (is_mirrored) {
+                int16_t tmp = l;
+                l = r;
+                r = tmp;
             }
+            eksekusi_belok(l, r, p.delay_ms);
             break;
-
-        case DEC_BELOK_KANAN:
-            if (p.delay_type == DELAY_A) {
-                eksekusi_belok((int16_t)p.belok_l, -(int16_t)p.belok_r,
-                               p.delay_ms, is_mirrored);
-            } else {
-                eksekusi_delay_b((int16_t)p.belok_l, -(int16_t)p.belok_r,
-                                 p.delay_ms, is_mirrored, p.Encd_l, p.Encd_r);
+        }
+        case DEC_BELOK_KIRI: {
+            int16_t l = -(int16_t)p.belok_l;
+            int16_t r =  (int16_t)p.belok_r;
+            if (is_mirrored) {
+                int16_t tmp = l;
+                l = r;
+                r = tmp;
             }
+            eksekusi_belok(l, r, p.delay_ms);
             break;
+        }
 
         case DEC_FREE: {
             int16_t fl = is_mirrored ? (int16_t)p.belok_r : (int16_t)p.belok_l;
@@ -371,6 +367,7 @@ bool mode_counter(uint8_t cp_start) {
         CounterParam& cur = g_counter[cidx];
         CounterParam& nxt = g_counter[cidx + 1];
 
+        // mirrored diambil dari config global
         bool is_mirrored = g_config.mirrored;
 
         // ── Mode timing cur: encoder atau timer ──

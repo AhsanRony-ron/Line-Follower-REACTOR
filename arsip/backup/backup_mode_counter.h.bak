@@ -20,6 +20,15 @@ extern int              g_LOUT;
 extern int              g_ROUT;
 extern int              g_error;
 extern int              g_last_error;
+extern uint8_t          sensor_inverted;
+
+// ─────────────────────────────────────────
+//  FLAG COND — adopt dari panzer
+//  0 = idle
+//  1 = seek kiri  (setelah belok kanan, tunggu sensor kiri aktif)
+//  2 = seek kanan (setelah belok kiri,  tunggu sensor kanan aktif)
+// ─────────────────────────────────────────
+static uint8_t g_flag_cond = 0;
 
 // ─────────────────────────────────────────
 //  RESET TIMER
@@ -39,129 +48,307 @@ inline int read_timer() {
 }
 
 // ─────────────────────────────────────────
+//  ENCODER HELPERS
+// ─────────────────────────────────────────
+
+// rata-rata absolut kedua encoder
+inline int32_t enc_avg() {
+    return (abs(encoderKiriRead()) + abs(encoderKananRead())) / 2;
+}
+
+// ambil tick roda luar berdasarkan arah actual motor
+inline int32_t enc_outer(int16_t actual_l, int16_t actual_r) {
+    if (actual_l > 0) return abs(encoderKiriRead());
+    if (actual_r > 0) return abs(encoderKananRead());
+    return enc_avg();
+}
+
+// resolve Encd dengan mirror swap + pilih outer wheel
+// dipakai untuk eksekusi belok/free (arah motor sudah diketahui)
+inline int16_t resolve_encd(int16_t actual_l, int16_t actual_r,
+                             int16_t encd_l,   int16_t encd_r,
+                             bool is_mirrored) {
+    int16_t el = is_mirrored ? encd_r : encd_l;
+    int16_t er = is_mirrored ? encd_l : encd_r;
+    return (actual_l > 0) ? el : er;
+}
+
+// resolve Encd untuk counter cur (maju lurus — tidak perlu arah motor)
+// ambil nilai yang non-zero, prioritas kiri
+inline int16_t resolve_encd_cur(int16_t encd_l, int16_t encd_r) {
+    if (encd_l > 0) return encd_l;
+    if (encd_r > 0) return encd_r;
+    return 0;
+}
+
+// ─────────────────────────────────────────
 //  FOLLOWING — PID ngikuti garis
 // ─────────────────────────────────────────
 void following(uint8_t kecepatan, uint8_t kp) {
-    scan_sensor(g_config.line);
-
-    // tidak update pv_out saat sensor kosong
-    //supaya tidak terpicu error ekstrem saat robot diangkat
+    scan_sensor();
     if (g_sensor_out != 0) {
         g_pv_out = input_error(g_sensor_out);
     }
     g_error = -g_pv_out;
-
     calc_pid(kp, g_config.kd);
-
-    g_LOUT = constrain((int)kecepatan - g_out_p - g_out_d, -255, 255);
-    g_ROUT = constrain((int)kecepatan + g_out_p + g_out_d, -255, 255);
-
+    g_LOUT = constrain((int)kecepatan + g_out_p + g_out_d, -255, 255);
+    g_ROUT = constrain((int)kecepatan - g_out_p - g_out_d, -255, 255);
     set_motors(g_LOUT, g_ROUT, DEFAULT_MAX_PWM);
 }
 
 // ─────────────────────────────────────────
-//  DELAY A — Free with memory (panzer aksi 1)
-//  1. Belok selama delay_ms
-//  2. Cari garis APAPUN (tidak tunggu arah spesifik)
-//  3. Langsung update error, lanjut line following
+//  CEK FLAG COND — adopt dari panzer
+//  Dipanggil setiap iterasi loop utama setelah scan sensor
+//  Cek apakah robot sudah nemu garis setelah belok
+//  Kalau sudah → reset flag_cond, paksa error ke arah koreksi
 // ─────────────────────────────────────────
-void eksekusi_delay_a(int16_t belok_l, int16_t belok_r, uint16_t delay_ms) {
-    // fase 1: belok, ignore sensor
-    set_motors(belok_l, belok_r, DEFAULT_MAX_PWM);
-    unsigned long t_start = millis();
-    while (millis() - t_start < delay_ms) { }
+bool cek_flag_cond(bool is_mirrored) {
+    if (g_flag_cond == 0) return false;
 
-    // fase 2: belok sampai find sensor APAPUN → langsung update error
-    while (true) {
-        scan_sensor(g_config.line);
-        if (g_sensor_out > 0) {
-            g_pv_out = input_error(g_sensor_out);
-            break;  // ← exit segera setelah terima sensor
-        }
+    // flag_cond=1: belok kanan → tunggu sensor KIRI aktif
+    if (g_flag_cond == 1 && (g_sensor_out & 0x0007) != 0) {
+        g_pv_out     = is_mirrored ? -24 : 24;
+        g_error      = -g_pv_out;
+        g_last_error =  g_error;
+        g_flag_cond  = 0;
+        return true;
+    }
+
+    // flag_cond=2: belok kiri → tunggu sensor KANAN aktif
+    if (g_flag_cond == 2 && (g_sensor_out & 0x3800) != 0) {
+        g_pv_out     = is_mirrored ? 24 : -24;  
+        g_error      = -g_pv_out;
+        g_last_error =  g_error;
+        g_flag_cond  = 0;
+        return true;
+    }
+
+    return false;
+}
+
+// ─────────────────────────────────────────
+//  SEEK MOTOR — set motor pivot sesuai flag_cond
+// ─────────────────────────────────────────
+inline void set_motor_seek(int16_t belok_l, int16_t belok_r) {
+    if (g_flag_cond == 1)
+        set_motors( (int16_t)belok_l, -(int16_t)belok_r, DEFAULT_MAX_PWM);
+    else
+        set_motors(-(int16_t)belok_l,  (int16_t)belok_r, DEFAULT_MAX_PWM);
+}
+
+// ─────────────────────────────────────────
+//  EKSEKUSI BELOK — non-blocking (DELAY_A)
+//  1. Set motor belok selama delay_ms
+//  2. Set flag_cond → seek dilanjutkan di loop utama
+// ─────────────────────────────────────────
+void eksekusi_belok(int16_t belok_l, int16_t belok_r,
+                    uint16_t delay_ms, bool is_mirrored) {
+    if (is_mirrored) {
+        set_motors(-belok_l, -belok_r, DEFAULT_MAX_PWM);
+    } else {
         set_motors(belok_l, belok_r, DEFAULT_MAX_PWM);
     }
+    delay(delay_ms);
 
-    // update error untuk line following berikutnya
-    if (belok_l < 0 && belok_r > 0) g_pv_out = -24;  // pivot kiri
-    if (belok_l > 0 && belok_r < 0) g_pv_out =  24;  // pivot kanan
-    g_error      = -g_pv_out;
-    g_last_error =  g_error;
+    // set flag_cond sesuai arah belok
+    if      (belok_l > 0 && belok_r < 0) g_flag_cond = 1;  // seek kiri
+    else if (belok_l < 0 && belok_r > 0) g_flag_cond = 2;  // seek kanan
+    else                                  g_flag_cond = 0;  // lurus
 }
 
 // ─────────────────────────────────────────
-//  DELAY B — Free tanpa memory (panzer aksi 2)
+//  EKSEKUSI DELAY B — blocking (DELAY_B)
+//  Durasi pakai encoder tick kalau Encd ada value,
+//  fallback ke delay_ms kalau Encd = 0
+//  flag_cond = 0 setelah selesai (tidak ada seek)
 // ─────────────────────────────────────────
-void eksekusi_delay_b(int16_t belok_l, int16_t belok_r, uint16_t delay_ms) {
-    set_motors(belok_l, belok_r, DEFAULT_MAX_PWM);
+void eksekusi_delay_b(int16_t belok_l, int16_t belok_r,
+                      uint16_t delay_ms, bool is_mirrored,
+                      int16_t encd_l, int16_t encd_r) {
+    int16_t actual_l = is_mirrored ? -belok_l : belok_l;
+    int16_t actual_r = is_mirrored ? -belok_r : belok_r;
+
+    set_motors(actual_l, actual_r, DEFAULT_MAX_PWM);
+
+    // int16_t target = resolve_encd(actual_l, actual_r, encd_l, encd_r, is_mirrored);
+
+    // if (target > 0) {
+    //     // tick mode — outer wheel
+    //     int32_t start = enc_outer(actual_l, actual_r);
+    //     while ((enc_outer(actual_l, actual_r) - start) < target);
+    // } else {
+    //     // fallback time
+    //     delay(delay_ms);
+    // }
+
     delay(delay_ms);
     clear_pid();
+    g_flag_cond = 0;
 }
 
 // ─────────────────────────────────────────
-//  EKSEKUSI DECISION
+//  TRIGGER MATCHED
+//  sensor_mask    : akumulasi OR sensor sejak timer habis
+//  sensor_realtime: g_sensor_out saat ini (untuk TRIGGER_BLANK)
 // ─────────────────────────────────────────
-void eksekusi_decision(CounterParam& p) {
-    switch (p.decision) {
+inline bool trigger_matched(uint16_t trigger, uint16_t sensor_mask, bool is_mirrored) {
+    if (trigger == TRIGGER_TIMER) return true;
+    if (trigger == TRIGGER_BLANK) return sensor_mask == 0;
 
-        case DEC_BELOK_KIRI:
-            // kiri: motor kiri mundur, motor kanan maju
-            eksekusi_delay_a(-(int16_t)p.belok_l, (int16_t)p.belok_r, p.delay_ms);
-            break;
-
-        case DEC_BELOK_KANAN:
-            // kanan: motor kiri maju, motor kanan mundur
-            eksekusi_delay_a((int16_t)p.belok_l, -(int16_t)p.belok_r, p.delay_ms);
-            break;
-
-        case DEC_FREE:
-            set_motors(p.free_l, p.free_r, DEFAULT_MAX_PWM);
-            delay(p.delay_ms);
-            clear_pid();
-            break;
-
-        case DEC_STOP:
-            motor_stop();
-            delay(p.delay_ms);
-            motor_stop();
-            break;
-
-        // DEC_LOST tidak ada action, hanya skip
-        case DEC_LOST:
-        default:
-            break;
+    if (is_mirrored) {
+        uint16_t mirrored_trigger = 0;
+        for (uint8_t i = 0; i < 14; i++) {
+            if (trigger & (1 << i)) mirrored_trigger |= (1 << (13 - i));
+        }
+        trigger = mirrored_trigger;
     }
+
+    return (sensor_mask & trigger) == trigger;
 }
 
 // ─────────────────────────────────────────
 //  HITUNG SPEED RAMP
-//  Linear interpolasi speed1 → speed2 selama timer
-//  Bisa naik maupun turun
+//  Linear interpolasi speed1 → speed2
 // ─────────────────────────────────────────
 inline uint8_t ramp_speed(uint8_t speed1, uint8_t speed2, int t, int timer) {
     if (timer <= 0) return speed2;
     if (t <= 0)     return speed1;
     if (t >= timer) return speed2;
-    // linear interpolasi: speed1 + (speed2-speed1) * t/timer
     int spd = (int)speed1 + ((int)speed2 - (int)speed1) * t / timer;
     return (uint8_t)constrain(spd, 0, 255);
 }
 
 // ─────────────────────────────────────────
+//  EKSEKUSI DECISION
+// ─────────────────────────────────────────
+bool eksekusi_decision(CounterParam& p, bool is_mirrored, unsigned long elapsed_start) {
+    switch (p.decision) {
+
+        case DEC_LOST:
+            // Do Noting
+            break;
+
+        case DEC_BELOK_KIRI:
+            if (p.delay_type == DELAY_A) {
+                eksekusi_belok(-(int16_t)p.belok_l, (int16_t)p.belok_r,
+                               p.delay_ms, is_mirrored);
+            } else {
+                eksekusi_delay_b(-(int16_t)p.belok_l, (int16_t)p.belok_r,
+                                 p.delay_ms, is_mirrored, p.Encd_l, p.Encd_r);
+            }
+            break;
+
+        case DEC_BELOK_KANAN:
+            if (p.delay_type == DELAY_A) {
+                eksekusi_belok((int16_t)p.belok_l, -(int16_t)p.belok_r,
+                               p.delay_ms, is_mirrored);
+            } else {
+                eksekusi_delay_b((int16_t)p.belok_l, -(int16_t)p.belok_r,
+                                 p.delay_ms, is_mirrored, p.Encd_l, p.Encd_r);
+            }
+            break;
+
+        case DEC_FREE: {
+            int16_t fl = is_mirrored ? (int16_t)p.belok_r : (int16_t)p.belok_l;
+            int16_t fr = is_mirrored ? (int16_t)p.belok_l : (int16_t)p.belok_r;
+
+            if (p.trigger == TRIGGER_TICK) {
+                // durasi pakai encoder — outer wheel sesuai arah fl/fr
+                int16_t target = resolve_encd(fl, fr, p.Encd_l, p.Encd_r, is_mirrored);
+                if (target > 0) {
+                    int32_t start = enc_outer(fl, fr);
+                    while ((enc_outer(fl, fr) - start) < target) {
+                        led_lcd(false);
+                        led_timer((read_timer() / 5) % 2 == 1);
+                        set_motors(fl, fr, DEFAULT_MAX_PWM);
+                    }
+                }
+            } else {
+                // durasi pakai timer (TRIGGER_TIMER atau TRIGGER_SENSOR)
+                int free_start = read_timer();
+                while ((read_timer() - free_start) < (int)p.timer) {
+                    led_lcd(false);
+                    led_timer((read_timer() / 5) % 2 == 1);
+                    set_motors(fl, fr, DEFAULT_MAX_PWM);
+                }
+            }
+
+            // clear di luar kedua branch — selalu dieksekusi
+            clear_pid();
+            g_flag_cond = 0;
+            break;
+        }
+        case DEC_STOP:
+            // --- TRIGGER_TIMER: following selama p.timer ---
+            if (p.trigger == TRIGGER_TIMER) {
+                reset_timer();
+                while (read_timer() < p.timer) {
+                    led_lcd(true);
+                    led_timer((read_timer() / 5) % 2 == 1);
+                    uint8_t spd = ramp_speed(p.speed1, p.speed2,
+                                            read_timer(), p.timer);
+                    scan_sensor();
+                    if (g_sensor_out != 0) g_pv_out = input_error(g_sensor_out);
+                    g_error = -g_pv_out;
+                    calc_pid(p.kp, g_config.kd);
+                    g_LOUT = constrain((int)spd + g_out_p + g_out_d, -255, 255);
+                    g_ROUT = constrain((int)spd - g_out_p - g_out_d, -255, 255);
+                    set_motors(g_LOUT, g_ROUT, DEFAULT_MAX_PWM);
+                }                          // ← tutup while
+            }                              // ← tutup if TRIGGER_TIMER
+
+            // --- TRIGGER_SENSOR: following sampai sensor match ---
+            else if (p.trigger != TRIGGER_TICK) {  // TRIGGER_SENSOR / TRIGGER_BLANK
+                uint16_t akum = 0;
+                while (true) {
+                    led_lcd(true);
+                    led_timer((read_timer() / 5) % 2 == 1);
+                    scan_sensor();
+                    if (g_sensor_out != 0) g_pv_out = input_error(g_sensor_out);
+                    g_error = -g_pv_out;
+                    calc_pid(p.kp, g_config.kd);
+                    g_LOUT = constrain((int)p.speed2 + g_out_p + g_out_d, -255, 255);
+                    g_ROUT = constrain((int)p.speed2 - g_out_p - g_out_d, -255, 255);
+                    set_motors(g_LOUT, g_ROUT, DEFAULT_MAX_PWM);
+                    akum |= g_sensor_out;
+                    if (trigger_matched(p.trigger, akum, is_mirrored)) break;
+                }
+            }
+
+            // --- STOP & finish ---
+            motor_brake();
+            delay(20);
+            motor_stop();
+            clear_pid();
+            g_flag_cond = 0;
+            led_lcd(false);
+            led_timer(false);
+            display_finish(millis() - elapsed_start);
+            while (!sw_save() && !sw_x() && !sw_next() && !sw_back());
+            return true;
+        
+
+        default:
+            break;
+    }
+
+    return false;
+}
+
+// ─────────────────────────────────────────
 //  MODE COUNTER — MAIN LOOP
-//  Panzer-like:
-//  - PID jalan terus di dalam loop utama
-//  - sensor_akumulasi OR (sensor_counter panzer)
-//  - trigger dicek setelah timer habis
-//  - C0 khusus: hanya timer + ramp speed, tanpa trigger/decision
 // ─────────────────────────────────────────
 bool mode_counter(uint8_t cp_start) {
+    u8g2.clearBuffer();
+    u8g2.sendBuffer();
+
     unsigned long elapsed_start = millis();
     uint8_t  start_counter = 0;
     uint16_t start_timer   = g_config.t_blank;
 
-    // resume dari CP
-    if (cp_start > 0 && cp_start < CP_MAX) {
-        CheckpointParam& cp = g_checkpoint[cp_start - 1];
+    // resume dari CP terpilih
+    if (cp_start < CP_MAX) {
+        CheckpointParam& cp = g_checkpoint[cp_start];
         if (cp.counter_pos != 0xFF) {
             start_counter = cp.counter_pos + 1;
             start_timer   = cp.timer_cp;
@@ -169,116 +356,168 @@ bool mode_counter(uint8_t cp_start) {
     }
 
     // ── T-BLANK / CP TIMER ──
-    // following dengan speed_mode (kecepatan mode normal) selama t_blank
+    g_flag_cond = 0;
     reset_timer();
     while (read_timer() < start_timer) {
-        int t = read_timer();
-        led_lcd(false);  // ← mati, masih warm-up
-        led_timer((t / 5) % 2 == 1);  // ← blink timer (reversed)
+        led_lcd(false);
+        led_timer((read_timer() / 5) % 2 == 1);
         following(g_config.speed_mode, g_config.kp);
-        display_running(
-            start_counter, read_timer(),
-            g_config.speed_mode, g_config.kp,
-            millis() - elapsed_start
-        );
+        decode_zone(0);
     }
 
     // ── LOOP COUNTER SEKUENSIAL ──
-    for (uint8_t cidx = start_counter; cidx < COUNTER_MAX; cidx++) {
+    for (uint8_t cidx = start_counter; cidx < COUNTER_MAX - 1; cidx++) {
         g_counter_idx = cidx;
-        CounterParam& p = g_counter[cidx];
+        CounterParam& cur = g_counter[cidx];
+        CounterParam& nxt = g_counter[cidx + 1];
 
-        clear_pid();
-        reset_timer();
+        bool is_mirrored = g_config.mirrored;
 
-        uint16_t sensor_akumulasi = 0;
-        bool beraksi = false;
-        bool timer_sudah_habis = false;  // flag untuk reset akumulasi sekali
+        // ── Mode timing cur: encoder atau timer ──
+        // resolve_encd_cur: ambil Encd yang non-zero (maju lurus, tidak perlu arah)
+        // int16_t cur_tick_target  = resolve_encd_cur(cur.Encd_l, cur.Encd_r);
+        // int32_t enc_counter_start = enc_avg();  // referensi encoder awal counter ini
+
+        uint16_t sensor_akumulasi  = 0;
+        bool beraksi           = false;
+        bool timer_sudah_habis = false;
+        // bool tick_init         = false;
+        // bool sensor_cleared    = false;
+        // int32_t tick_start     = 0;
 
         // ── LOOP UTAMA ──
         while (!beraksi) {
-            int t = read_timer();
+            int t         = read_timer();
+            // int32_t enc_now = enc_avg() - enc_counter_start;
 
-            // LED indicator
-            if (cidx > 0) led_lcd(t >= p.timer);
-            else led_lcd(false);
+            // // ── LED ──
+            // bool waktu_habis_led = (cur_tick_target > 0)
+            //     ? (enc_now >= cur_tick_target)
+            //     : (t >= cur.timer);
+            // led_lcd(waktu_habis_led);
+            // led_timer((t / 5) % 2 == 1);
+
+            led_lcd(t >= cur.timer);
             led_timer((t / 5) % 2 == 1);
 
-            // hitung speed
-            uint8_t spd = (t < p.timer)
-                ? ramp_speed(p.speed1, p.speed2, t, p.timer)
-                : p.speed2;
+            uint8_t spd = (t < cur.timer)
+                ? ramp_speed(cur.speed1, cur.speed2, t, cur.timer)
+                : cur.speed2;
+            // ── RAMP SPEED ──
+            // uint8_t spd;
+            // if (cur_tick_target > 0) {
+            //     spd = ramp_speed(cur.speed1, cur.speed2,
+            //                      (int)enc_now, (int)cur_tick_target);
+            // } else {
+            //     spd = (t < cur.timer)
+            //         ? ramp_speed(cur.speed1, cur.speed2, t, cur.timer)
+            //         : cur.speed2;
+            // }
 
-            // ── C0: langsung following, skip trigger ──
-            if (cidx == 0) {
-                following(spd, p.kp);
-                display_running(cidx, t, spd, p.kp, millis() - elapsed_start);
-                if (t >= p.timer) beraksi = true;
-                continue;
+            // ── SENSOR & PID ──
+            scan_sensor();
+            if (g_sensor_out != 0) g_pv_out = input_error(g_sensor_out);
+
+            bool seeking = (g_flag_cond != 0);
+            bool found   = cek_flag_cond(is_mirrored);
+
+            g_error = -g_pv_out;
+            calc_pid(cur.kp, g_config.kd);
+
+            if (seeking && !found) {
+                set_motor_seek(cur.belok_l, cur.belok_r);
+            } else {
+                g_LOUT = constrain((int)spd + g_out_p + g_out_d, -255, 255);
+                g_ROUT = constrain((int)spd - g_out_p - g_out_d, -255, 255);
+                set_motors(g_LOUT, g_ROUT, DEFAULT_MAX_PWM);
             }
 
-            // ── SCAN SENSOR MANUAL — pisah dari following ──
-            scan_sensor(g_config.line);
-            if (g_sensor_out != 0) g_pv_out = input_error(g_sensor_out);
-            g_error = -g_pv_out;
+            // ── CEK TRIGGER ──
 
-            // ── CEK TRIGGER DULU ──
-            if (t >= p.timer) {
+            // if (nxt.trigger == TRIGGER_TICK) {
+            //     // TRIGGER_TICK: bypass timer, cek encoder dari awal counter
+            //     if (!tick_init) {
+            //         tick_start = enc_avg();
+            //         tick_init  = true;
+            //     }
+            //     int16_t target = resolve_encd(
+            //         (int16_t)nxt.belok_l, (int16_t)nxt.belok_r,
+            //         nxt.Encd_l, nxt.Encd_r, is_mirrored
+            //     );
+            //     int32_t tick_delta = enc_avg() - tick_start;
+            //     if (target == 0 || tick_delta >= target) {
+            //         beraksi = true;
+            //     }
+
+            // } else if (!seeking) {
+            //     // TRIGGER_TIMER / TRIGGER_SENSOR: tunggu waktu habis dulu
+            //     bool waktu_habis = (cur_tick_target > 0)
+            //         ? (enc_now >= cur_tick_target)
+            //         : (t >= cur.timer);
+
+                // if (waktu_habis) {
+                //     if (!timer_sudah_habis) {
+                //         sensor_akumulasi  = 0;
+                //         timer_sudah_habis = true;
+                //     }
+
+                //     if (!sensor_cleared) {
+                //         if (g_sensor_out == 0) sensor_cleared = true;
+                //     }
+
+                    // if (sensor_cleared) {                              // ← guard ini
+                    //     sensor_akumulasi |= g_sensor_out; }
+            if (t >= cur.timer && !seeking) {
                 if (!timer_sudah_habis) {
-                    sensor_akumulasi = 0;
+                    sensor_akumulasi  = 0;
                     timer_sudah_habis = true;
                 }
                 sensor_akumulasi |= g_sensor_out;
 
-                if (p.trigger == TRIGGER_TIMER) {
+                if (nxt.decision == DEC_FREE ||
+                    trigger_matched(nxt.trigger, sensor_akumulasi, is_mirrored)) {
                     beraksi = true;
-                } else if (p.trigger == TRIGGER_BLANK) {
-                    if (g_sensor_out == 0) beraksi = true;
-                } else {
-                    if ((p.trigger & sensor_akumulasi) == p.trigger) beraksi = true;
                 }
             }
-
-            // ── BARU SET MOTOR — hanya kalau belum beraksi ──
-            if (!beraksi) {
-                calc_pid(p.kp, g_config.kd);
-                g_LOUT = constrain((int)spd - g_out_p - g_out_d, -255, 255);
-                g_ROUT = constrain((int)spd + g_out_p + g_out_d, -255, 255);
-                set_motors(g_LOUT, g_ROUT, DEFAULT_MAX_PWM);
-            } else {
-                motor_stop();  // trigger aktif → stop dulu sebelum eksekusi
-            }
-
-            display_running(cidx, t, spd, p.kp, millis() - elapsed_start);
         }
+        
 
         // ── EKSEKUSI DECISION ──
-        // C0 tidak punya decision → langsung lanjut ke C1
-        if (cidx == 0) continue;
+        if (eksekusi_decision(nxt, is_mirrored, elapsed_start)) return true;
 
-        // LOST tidak punya action → langsung lanjut ke counter berikutnya
-        if (p.decision == DEC_LOST) continue;
+        // ── TUNGGU SEEKING SELESAI ──
+        while (g_flag_cond != 0) {
+            scan_sensor();
+            if (g_sensor_out != 0) g_pv_out = input_error(g_sensor_out);
 
-        if (p.decision == DEC_STOP) {
-            motor_stop();
-            led_lcd(false);
-            led_timer(false);
-            unsigned long t_finish = millis() - elapsed_start;
-            delay(p.delay_ms);
-            display_finish(t_finish);
-            while (!sw_save() && !sw_x() && !sw_next() && !sw_back());
-            return true;
+            bool found = cek_flag_cond(is_mirrored);
+
+            g_error = -g_pv_out;
+            calc_pid(nxt.kp, g_config.kd);
+
+            if (g_flag_cond != 0) {
+                set_motor_seek(nxt.belok_l, nxt.belok_r);
+            } else {
+                // sudah nemu garis → PID normal
+                g_LOUT = constrain((int)nxt.speed2 + g_out_p + g_out_d, -255, 255);
+                g_ROUT = constrain((int)nxt.speed2 - g_out_p - g_out_d, -255, 255);
+                set_motors(g_LOUT, g_ROUT, DEFAULT_MAX_PWM);
+            }
         }
 
-        eksekusi_decision(p);
-
-        // ── LED OFF setelah action ──
+        // ── RESET UNTUK COUNTER BERIKUTNYA ──
+        clear_pid();
+        reset_timer();
+        decode_zone(g_counter[cidx].Line_C);
         led_lcd(false);
         led_timer(false);
     }
 
     // semua counter habis tanpa STOP
+    // motor_brake();
+    // delay(20);
     motor_stop();
+    g_flag_cond = 0;
     led_lcd(false);
     led_timer(false);
     display_finish(millis() - elapsed_start);

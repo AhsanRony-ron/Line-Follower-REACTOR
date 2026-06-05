@@ -100,15 +100,15 @@ struct __attribute__((packed)) GlobalConfig {
 //  DEFAULT VALUES
 // ─────────────────────────────────────────
 
-#define DEFAULT_SPEED1      150
-#define DEFAULT_SPEED2      150
+#define DEFAULT_SPEED1      80
+#define DEFAULT_SPEED2      80
 #define DEFAULT_MAX_PWM     255
-#define DEFAULT_KP          10
+#define DEFAULT_KP          5
 #define DEFAULT_KD          100
 #define DEFAULT_TIMER       10      
 #define DEFAULT_DELAY_MS    50
-#define DEFAULT_BELOK_L     100
-#define DEFAULT_BELOK_R     100
+#define DEFAULT_BELOK_L     60
+#define DEFAULT_BELOK_R     60
 #define DEFAULT_FREE_L      50
 #define DEFAULT_FREE_R      -50
 #define DEFAULT_LINE        LINE_AUTO
