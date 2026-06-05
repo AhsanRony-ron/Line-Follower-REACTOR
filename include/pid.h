@@ -52,6 +52,5 @@ void mode_normal(uint8_t kecepatan, uint8_t maxpwm, uint8_t kp, uint8_t kd, Line
 
     g_LOUT = constrain((int)kecepatan + g_out_p + g_out_d, -255, 255);
     g_ROUT = constrain((int)kecepatan - g_out_p - g_out_d, -255, 255);
-
     set_motors(g_LOUT, g_ROUT, maxpwm);
 }

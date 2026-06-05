@@ -6,8 +6,8 @@
 // ─────────────────────────────────────────
 //  GLOBAL SENSOR STATE
 // ─────────────────────────────────────────
-extern uint8_t  g_sensor_raw[SENSOR_COUNT];     // analog val
-extern uint8_t  g_sensor_thresh[SENSOR_COUNT];  // threshold kalibrasi
+extern uint8_t  g_sensor_raw[SENSOR_COUNT]; //analog_val
+extern uint8_t  g_sensor_thresh[SENSOR_COUNT]; //sensor_threshold
 extern uint8_t  g_sensor_state[SENSOR_COUNT];
 extern uint16_t g_sensor_out;   // bitmask 14-bit hasil scan — selalu nilai FINAL
 extern int      g_pv_out;       // untuk input_error() default case
@@ -126,84 +126,99 @@ void scan_sensor_bar() {
     }
 }
 
-// ─────────────────────────────────────────
-//  SCAN SENSOR
-//  Return: bitmask 14-bit FINAL (setelah semua transformasi)
-//  g_sensor_out selalu di-update dengan nilai FINAL
+// ============================================================
+// SCAN SENSOR — read_sensor @ 0x08001560
 //
-//  FIX: g_sensor_out dulu di-assign di tengah fungsi sebelum
-//       logika invert — sekarang dipindah ke akhir tiap return path
-//       supaya selalu reflect nilai yang benar-benar dipakai
-// ─────────────────────────────────────────
+// param_1:
+//   0 = normal
+//   2 = invert (sensor terbalik, bitmask = 0x3FFF - bitmask)
+//
+// Return: bitmask 14-bit
+//   bit 0  (0x0001) = sensor 0  paling kiri
+//   bit 13 (0x2000) = sensor 13 paling kanan
+// ============================================================
 
 uint16_t scan_sensor() {
     uint16_t bitmask = 0;
-    uint8_t  cnt[14] = {0};
 
+    // Counter per sensor (hanya sensor tertentu punya counter)
+    uint8_t cnt[14] = {0};
+
+    // Reset active count
     sensor_active_count = 0;
 
-    // Baca 14 sensor
+    // Baca 14 sensor (urutan terbalik: 0xd downto 0)
     for (uint8_t i = 0; i < 14; i++) {
         uint8_t adc = read_adc(i);
         g_sensor_raw[i] = adc;
 
-        if (g_sensor_thresh[i] < (adc & 0xFF)) {
+        // Simpan ke raw buffer (RAM DAT_080017cc + i*4)
+        // (disimpan di analog_val[i])
+
+        uint8_t adc8 = adc & 0xFF;
+
+        // Bandingkan dengan threshold (RAM DAT_080017d0 + i)
+        if (g_sensor_thresh[i] < adc8) {
+            // Set bit di bitmask sesuai urutan binary
             bitmask += (1 << i);
             sensor_active_count++;
             cnt[i] = 1;
         }
     }
 
-    // Simpan counter per sensor
-    sensor_count[5]  = cnt[5];
-    sensor_count[3]  = cnt[3];
-    sensor_count[2]  = cnt[2];
-    sensor_count[0]  = cnt[0];
-    sensor_count[8]  = cnt[8];
-    sensor_count[9]  = cnt[9];
-    sensor_count[10] = cnt[10];
-    sensor_count[11] = cnt[11];
-    sensor_count[12] = cnt[12];
-    sensor_count[4]  = cnt[4];
-    sensor_count[13] = cnt[13];
-    sensor_count[1]  = cnt[1];
-    sensor_inverted  = 0;
+    // Simpan bitmask ke out_sensor
+    g_sensor_out = bitmask;
 
-    // ── TRANSFORMASI BITMASK ──
+    // Simpan counter per sensor ke RAM
+    // (sesuai urutan penyimpanan di binary)
+    sensor_count[5]  = cnt[5];   // cVar21 → DAT_080017d8
+    sensor_count[3]  = cnt[3];   // cVar19 → DAT_080017dc
+    sensor_count[2]  = cnt[2];   // cVar8  → DAT_080017e0
+    sensor_count[0]  = cnt[0];   // cVar7  → DAT_080017e4
+    sensor_count[8]  = cnt[8];   // cVar9  → DAT_080017e8
+    sensor_count[9]  = cnt[9];   // cVar10 → DAT_080017ec
+    sensor_count[10] = cnt[10];  // cVar11 → DAT_080017f0
+    sensor_count[11] = cnt[11];  // cVar12 → DAT_080017f4
+    sensor_count[12] = cnt[12];  // cVar13 → DAT_080017f8
+    sensor_count[4]  = cnt[4];   // cVar20 → DAT_080017fc
+    sensor_count[13] = cnt[13];  // cVar14 → DAT_08001800
+    sensor_count[1]  = cnt[1];   // cVar18 → DAT_08001804
+    sensor_inverted  = 0;        // DAT_08001808 = 0
+
     if (g_line_param == 2) {
-        // Mode invert penuh
+        // Mode invert: sensor terbalik
         bitmask = 0x3FFF - bitmask;
+        g_sensor_out = bitmask;
         for (uint8_t i = 0; i < 14; i++) {
-            if (i != 6 && i != 7)
+            if (i != 6 && i != 7) // sensor 6 & 7 tidak punya counter
                 sensor_count[i] = 1 - sensor_count[i];
         }
         sensor_inverted = 1;
-        noise_counter   = 0;
+        noise_counter = 0;
     } else {
         if (g_line_param == 0 && noise_counter == 1) {
-            // Invert sementara saat noise_counter==1
+            // Simpan ke buffer kedua (kalibrasi/referensi)
+            // Invert ke buffer 0x19fc-0x1a1c
             bitmask = 0x3FFF - bitmask;
             sensor_inverted = 1;
         }
         noise_counter = 0;
     }
 
-    // ── FILTER NOISE ──
+    // Filter noise pattern
     if (is_noise_pattern(bitmask)) {
         if (g_line_param == 0) noise_counter++;
-        g_sensor_out = bitmask;  // ← update FINAL sebelum return
         return bitmask;
     }
 
-    // ── NEIGHBOR VALIDITY ──
+    // Cek neighbor validity
     uint16_t neighbor = get_neighbor(bitmask);
     if (bitmask != neighbor) {
-        g_sensor_out = bitmask;  // ← update FINAL sebelum return
-        return bitmask;
+        return bitmask; // valid, langsung return
     }
 
-    if (g_line_param == 0) noise_counter++;
-    g_sensor_out = bitmask;  // ← update FINAL sebelum return
+    // Increment noise counter
+    if (g_line_param     == 0) noise_counter++;
     return bitmask;
 }
 

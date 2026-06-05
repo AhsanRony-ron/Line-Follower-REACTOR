@@ -58,3 +58,12 @@ inline void motor_putar_kanan(int spd) { set_motors(spd,  -spd, PWM_MAX); }
 inline void motor_putar_kiri(int spd)  { set_motors(-spd,  spd, PWM_MAX); }
 inline void motor_belok_kanan(int spd) { set_motors(spd,   0,   PWM_MAX); }
 inline void motor_belok_kiri(int spd)  { set_motors(0,    spd,  PWM_MAX); }
+
+inline void motor_brake()
+{
+    analogWrite(PIN_LPWM1, 255);
+    analogWrite(PIN_LPWM2, 255);
+
+    analogWrite(PIN_RPWM1, 255);
+    analogWrite(PIN_RPWM2, 255);
+}
