@@ -184,9 +184,9 @@ void eksekusi_delay_b(int16_t belok_l, int16_t belok_r,
 //  sensor_mask    : akumulasi OR sensor sejak timer habis
 //  sensor_realtime: g_sensor_out saat ini (untuk TRIGGER_BLANK)
 // ─────────────────────────────────────────
-inline bool trigger_matched(uint16_t trigger, uint16_t sensor_mask, bool is_mirrored) {
+inline bool trigger_matched(uint16_t trigger, uint16_t sensor_mask, uint16_t sensor_realtime, bool is_mirrored) {
     if (trigger == TRIGGER_TIMER) return true;
-    if (trigger == TRIGGER_BLANK) return sensor_mask == 0;
+    if (trigger == TRIGGER_BLANK) return sensor_realtime == 0;
 
     if (is_mirrored) {
         uint16_t mirrored_trigger = 0;
@@ -307,7 +307,7 @@ bool eksekusi_decision(CounterParam& p, bool is_mirrored, unsigned long elapsed_
                     g_ROUT = constrain((int)p.speed2 - g_out_p - g_out_d, -255, 255);
                     set_motors(g_LOUT, g_ROUT, DEFAULT_MAX_PWM);
                     akum |= g_sensor_out;
-                    if (trigger_matched(p.trigger, akum, is_mirrored)) break;
+                    if (trigger_matched(p.trigger, akum, g_sensor_out, is_mirrored)) break;
                 }
             }
 
@@ -360,7 +360,11 @@ bool mode_counter(uint8_t cp_start) {
         led_timer((read_timer() / 5) % 2 == 1);
         following(g_config.speed_mode, g_config.kp);
         decode_zone(0);
+
+        //display_running(start_counter, read_timer(),g_config.speed_mode, g_config.kp);
     }
+
+    reset_timer(); 
 
     // ── LOOP COUNTER SEKUENSIAL ──
     for (uint8_t cidx = start_counter; cidx < COUNTER_MAX - 1; cidx++) {
@@ -397,6 +401,7 @@ bool mode_counter(uint8_t cp_start) {
 
             led_lcd(t >= cur.timer);
             led_timer((t / 5) % 2 == 1);
+            //display_running(start_counter, read_timer(),g_config.speed_mode, g_config.kp);
 
             uint8_t spd = (t < cur.timer)
                 ? ramp_speed(cur.speed1, cur.speed2, t, cur.timer)
@@ -431,6 +436,7 @@ bool mode_counter(uint8_t cp_start) {
             }
 
             // ── CEK TRIGGER ──
+            
 
             // if (nxt.trigger == TRIGGER_TICK) {
             //     // TRIGGER_TICK: bypass timer, cek encoder dari awal counter
@@ -473,7 +479,7 @@ bool mode_counter(uint8_t cp_start) {
                 sensor_akumulasi |= g_sensor_out;
 
                 if (nxt.decision == DEC_FREE ||
-                    trigger_matched(nxt.trigger, sensor_akumulasi, is_mirrored)) {
+                    trigger_matched(nxt.trigger, sensor_akumulasi,g_sensor_out , is_mirrored)) {
                     beraksi = true;
                 }
             }

@@ -227,8 +227,7 @@ void display_kalibrasi(uint8_t high[SENSOR_COUNT], uint8_t low[SENSOR_COUNT]) {
 // │ L:120      R:085    │
 // └─────────────────────┘
 
-void display_running(uint8_t counter, int timer_val, uint8_t speed,
-                     uint8_t kp, unsigned long elapsed_ms) {
+void display_running(uint8_t counter, int timer_val, uint8_t speed, uint8_t kp) {
     static unsigned long last_refresh = 0;
     if (millis() - last_refresh < 100) return;  // max 10fps
     last_refresh = millis();
@@ -237,15 +236,10 @@ void display_running(uint8_t counter, int timer_val, uint8_t speed,
 
     // y=0..7  : baris 0 — counter, timer, speed
     disp_textf(0, 0, "C:%02d T:%03d S:%03d", counter, timer_val, speed);
+    disp_textf(0, 1, "Kp:%-3d  ", kp);
 
-    // y=8..15 : baris 1 — kp + stopwatch
-    uint32_t sec_total = elapsed_ms / 1000;
-    uint8_t  min_val   = (uint8_t)(sec_total / 60);
-    float    sec_val   = (elapsed_ms % 60000) / 1000.0f;
-    disp_textf(0, 1, "Kp:%-3d  %02d:%04.1fs", kp, min_val, sec_val);
-
-    // y=16..47 : bar sensor (32px tinggi)
-    disp_sensor_bar(16, 47);
+    // // y=16..47 : bar sensor (32px tinggi)
+    // disp_sensor_bar(16, 47);
 
     // y=48..55 : baris 3 — PWM motor (ROW(6) = 48)
     u8g2.setCursor(0, 48);

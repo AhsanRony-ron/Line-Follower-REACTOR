@@ -48,7 +48,7 @@ int g_out_d      = 0;
 int g_LOUT       = 0;
 int g_ROUT       = 0;
 
-volatile unsigned long last_timer_ms = 0;
+// volatile unsigned long last_timer_ms = 0;
 volatile bool tanda_mode_counter = false;
 
 // ─────────────────────────────────────────
@@ -63,19 +63,19 @@ void timer_isr() {
     }
 }
 
-void timer_init1() {
-    // Software timer using millis() - called from loop()
-    last_timer_ms = millis();
-}
+// void timer_init1() {
+//     // Software timer using millis() - called from loop()
+//     last_timer_ms = millis();
+// }
 
-void timer_update() {
-    unsigned long now = millis();
+// void timer_update() {
+//     unsigned long now = millis();
 
-    if (now - last_timer_ms >= g_config.periode) {
-    last_timer_ms = now;
-    timer_isr();
-    }
-}
+//     if (now - last_timer_ms >= g_config.periode) {
+//     last_timer_ms = now;
+//     timer_isr();
+//     }
+// }
 
 
 // ─────────────────────────────────────────
@@ -88,7 +88,7 @@ void setup() {
     hardware_init();
     Wire.setClock(400000);
     eeprom_init();
-    timer_init1();
+    // timer_init1();
 }
 
 // ─────────────────────────────────────────
@@ -96,7 +96,7 @@ void setup() {
 // ─────────────────────────────────────────
 
 void loop() {
-    timer_update();
+    // timer_update();
     // layar standby — pilih CP, tunggu start atau masuk menu
     uint8_t cp_sel = screen_standby();
 
