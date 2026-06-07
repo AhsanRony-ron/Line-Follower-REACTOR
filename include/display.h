@@ -281,6 +281,7 @@ static const char* MENU1_LABELS[] = {
     "Periode", "T-Blank", "PWM_F", "Mirror",
     "H-Check", "M_Slot"
 };
+
 #define MENU1_COUNT 11
 
 void display_menu1(uint8_t scroll, uint8_t highlight, GlobalConfig& cfg, uint8_t edit_sub = 0) {
@@ -427,10 +428,10 @@ void display_counter(uint8_t counter_idx, uint8_t scroll, uint8_t highlight,
     // C0 khusus: hanya Timer(1), Speed(2), Kp(4) → remapping ke index 0,1,2
     // C1+: semua item normal tanpa free PWM terpisah
     bool is_c0 = (counter_idx == 0);
-    uint8_t max_idx = is_c0 ? 3 : COUNTER_ITEM_COUNT;
+    uint8_t max_idx = is_c0 ? 4 : COUNTER_ITEM_COUNT;
 
-    // lookup index item C0: 0→Timer(1), 1→Speed(2), 2→Kp(4)
-    const uint8_t c0_map[] = {1, 2, 4};
+    // lookup index item C0: 0→Timer(1), 1→Speed(2), 2→Kp(4), 3→Encoder(6)
+    const uint8_t c0_map[] = {1, 2, 4, 6}; 
 
     for (uint8_t i = 0; i < 6; i++) {
         uint8_t idx_raw = scroll + i;
