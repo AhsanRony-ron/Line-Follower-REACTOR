@@ -63,21 +63,6 @@ void timer_isr() {
     }
 }
 
-// void timer_init1() {
-//     // Software timer using millis() - called from loop()
-//     last_timer_ms = millis();
-// }
-
-// void timer_update() {
-//     unsigned long now = millis();
-
-//     if (now - last_timer_ms >= g_config.periode) {
-//     last_timer_ms = now;
-//     timer_isr();
-//     }
-// }
-
-
 // ─────────────────────────────────────────
 //  SETUP
 // ─────────────────────────────────────────
@@ -88,7 +73,6 @@ void setup() {
     hardware_init();
     Wire.setClock(400000);
     eeprom_init();
-    // timer_init1();
 }
 
 // ─────────────────────────────────────────
@@ -96,7 +80,6 @@ void setup() {
 // ─────────────────────────────────────────
 
 void loop() {
-    // timer_update();
     // layar standby — pilih CP, tunggu start atau masuk menu
     uint8_t cp_sel = screen_standby();
 

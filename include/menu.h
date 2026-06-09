@@ -377,7 +377,7 @@ void menu_counter_edit(uint8_t cidx) {
     lastEnc_l = encoderKiriRead();
 
     // lookup index item C0: 0→Timer(1), 1→Speed(2), 2→Kp(4)
-    const uint8_t c0_map[] = {1, 2, 4};
+    const uint8_t c0_map[] = {1, 2, 4, 6};
 
     while (true) {
         CounterParam& p = g_counter[cidx];
@@ -385,7 +385,7 @@ void menu_counter_edit(uint8_t cidx) {
 
         // C0: hanya 3 item (Timer, Speed, Kp)
         // C1+: normal 6 item
-        uint8_t max_item = is_c0 ? 3 : 8;
+        uint8_t max_item = is_c0 ? 4 : 8;
 
         if (highlight > max_item) highlight = max_item;
 
@@ -421,11 +421,15 @@ void menu_counter_edit(uint8_t cidx) {
         // ── X: toggle edit_sub ──
         if (btn_x()) {
             if (is_c0) {
-                // C0: hanya Speed (highlight==2) yang punya sub
-                edit_sub = (highlight == 2) ? !edit_sub : 0;
+                // Speed (highlight==2) dan Encoder (highlight==4) punya sub
+                if (highlight == 2 || highlight == 4) {
+                    edit_sub = !edit_sub;
+                } else {
+                    edit_sub = 0;
+                }
             } else {
                 switch (highlight) {
-                    case 0: case 2: case 5:  // C, Timer, Kp: tidak ada sub
+                    case 0: case 2: case 5:   // C, Timer, Kp: tidak ada sub
                         edit_sub = 0;
                         break;
                     default:
@@ -470,11 +474,11 @@ void menu_counter_edit(uint8_t cidx) {
 
                 case 2: // Speed1 & Speed2
                     if (edit_sub == 0) {
-                        if (btn_next()) { if (p.speed1 < 255) p.speed1++; }
-                        if (btn_back()) { if (p.speed1 > 0)   p.speed1--; }
+                        if (btn_next()) { if (p.speed1 < 255) p.speed1 += 5; }
+                        if (btn_back()) { if (p.speed1 > 0)   p.speed1 -= 5; }
                     } else {
-                        if (btn_next()) { if (p.speed2 < 255) p.speed2++; }
-                        if (btn_back()) { if (p.speed2 > 0)   p.speed2--; }
+                        if (btn_next()) { if (p.speed2 < 255) p.speed2 += 5; }
+                        if (btn_back()) { if (p.speed2 > 0)   p.speed2 -= 5; }
                     }
                     break;
 

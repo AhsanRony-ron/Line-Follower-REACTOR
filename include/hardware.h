@@ -73,13 +73,13 @@ uint8_t batt_percent(float voltage) {
 void isrKiriA() {
     bool a = digitalRead(ENC_KIRI_A);
     bool b = digitalRead(ENC_KIRI_B);
-    countKiri += (a == b) ? -1 : +1;
+    countKiri += (a == b) ? +1 : -1;
 }
 
 void isrKananA() {
     bool a = digitalRead(ENC_KANAN_A);
     bool b = digitalRead(ENC_KANAN_B);
-    countKanan += (a == b) ? +1 : -1;
+    countKanan += (a == b) ? -1 : +1;
 }
 int32_t encoderKiriRead() {
     noInterrupts();
