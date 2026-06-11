@@ -68,6 +68,7 @@ struct __attribute__((packed)) CounterParam {
     int16_t   belok_r;      // PWM roda kanan saat belok/lost
     int16_t   Encd_l;       // Encoder Kiri
     int16_t   Encd_r;       // Encoder kanan
+    int16_t   Encd_b;       // Encoder belok
     LineCounterMode Line_C; // Mode penghitung garis
 };
 
@@ -100,17 +101,15 @@ struct __attribute__((packed)) GlobalConfig {
 //  DEFAULT VALUES
 // ─────────────────────────────────────────
 
-#define DEFAULT_SPEED1      80
-#define DEFAULT_SPEED2      80
+#define DEFAULT_SPEED1      200
+#define DEFAULT_SPEED2      200
 #define DEFAULT_MAX_PWM     255
-#define DEFAULT_KP          5
+#define DEFAULT_KP          10
 #define DEFAULT_KD          100
 #define DEFAULT_TIMER       10      
 #define DEFAULT_DELAY_MS    50
-#define DEFAULT_BELOK_L     60
-#define DEFAULT_BELOK_R     60
-#define DEFAULT_FREE_L      50
-#define DEFAULT_FREE_R      -50
+#define DEFAULT_BELOK_L     180
+#define DEFAULT_BELOK_R     180
 #define DEFAULT_LINE        LINE_AUTO
 #define DEFAULT_TRIGGER     TRIGGER_TIMER
 #define DEFAULT_DECISION    DEC_STOP

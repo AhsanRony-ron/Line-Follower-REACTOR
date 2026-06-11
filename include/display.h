@@ -491,7 +491,11 @@ void display_counter(uint8_t counter_idx, uint8_t scroll, uint8_t highlight,
                 if (edit_mode && active && edit_sub == 0) u8g2.print("]");
                 u8g2.print(" ");
                 if (edit_mode && active && edit_sub == 1) u8g2.print("[");
-                snprintf(buf, sizeof(buf), "%4dms", p.delay_ms);
+                if (p.Encd_b > 0) {
+                    snprintf(buf, sizeof(buf), "E:%4d", p.Encd_b);
+                } else {
+                    snprintf(buf, sizeof(buf), "T:%4dms", p.delay_ms);
+                }
                 u8g2.print(buf);
                 if (edit_mode && active && edit_sub == 1) u8g2.print("]");
                 break;

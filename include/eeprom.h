@@ -285,8 +285,9 @@ void load_defaults() {
         g_counter[i].delay_ms   = DEFAULT_DELAY_MS;
         g_counter[i].belok_l    = DEFAULT_BELOK_L;
         g_counter[i].belok_r    = DEFAULT_BELOK_R;
-        g_counter[i].Encd_l     = DEFAULT_FREE_L;   // ← fix
-        g_counter[i].Encd_r     = DEFAULT_FREE_R;   // ← fix
+        g_counter[i].Encd_l     = 0;
+        g_counter[i].Encd_r     = 0;
+        g_counter[i].Encd_b     = 0;
         g_counter[i].Line_C     = DEFAULT_LINE_COUNTER; 
     }
 
