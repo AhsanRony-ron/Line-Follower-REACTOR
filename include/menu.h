@@ -165,20 +165,20 @@ uint8_t screen_standby() {
     wait_release();
 
     while (true) {
-        // throttle display 100ms — biar tombol responsif
         unsigned long now = millis();
-        if (now - last_disp >= 100) {
+        bool just_displayed = false;
+
+        if (now - last_disp >= 50) {
             scan_sensor_bar();
             float volt = read_voltage();
             display_standby(cp_sel, volt, g_config.mem_slot);
             last_disp = now;
+            just_displayed = true;
         }
 
-        if (btn_up()) {
-            if (cp_sel < CP_MAX) cp_sel++; 
-        }
-        if (btn_down()) {
-            if (cp_sel > 0) cp_sel--;
+        if (!just_displayed) {
+            if (btn_up())   { if (cp_sel < CP_MAX) cp_sel++; }
+            if (btn_down()) { if (cp_sel > 0) cp_sel--; }
         }
 
         // SAVE = START
@@ -482,16 +482,51 @@ void menu_counter_edit(uint8_t cidx) {
                     }
                     break;
 
-                case 3: // Delay type & durasi (C1+ only)
+                case 3: {
+                    static bool enc_mode  = false;
+                    static int8_t init_cidx = -1;
+                    if (init_cidx != (int8_t)cidx) {
+                        enc_mode  = (p.Encd_b > 0);  // init dari nilai yang ada
+                        init_cidx = (int8_t)cidx;
+                        lastEnc_l = encoderKiriRead();
+                        lastEnc_r = encoderKananRead();
+                    }
+
                     if (edit_sub == 0) {
                         if (btn_next() || btn_back()) {
                             p.delay_type = (p.delay_type == DELAY_A) ? DELAY_B : DELAY_A;
                         }
                     } else {
-                        if (btn_next()) { if (p.delay_ms < 10000) p.delay_ms += 10; }
-                        if (btn_back()) { if (p.delay_ms >= 10)   p.delay_ms -= 10; }
+                        // toggle mode
+                        if (btn_next()) {
+                            enc_mode = !enc_mode;
+                        }
+
+                        // reset nilai aktif
+                        if (btn_back()) {
+                            if (enc_mode) p.Encd_b  = 0;
+                            else          p.delay_ms = 0;
+                        }
+
+                        // encoder fisik
+                        int32_t cur_l   = encoderKiriRead();
+                        int32_t cur_r   = encoderKananRead();
+                        int32_t delta_l = cur_l - lastEnc_l;
+                        int32_t delta_r = cur_r - lastEnc_r;
+                        int32_t delta   = (delta_l != 0) ? delta_l : delta_r;
+
+                        if (delta != 0) {
+                            if (enc_mode) {
+                                p.Encd_b   = (int16_t)constrain((int32_t)p.Encd_b   + delta,      0, 10000);
+                            } else {
+                                p.delay_ms = (uint16_t)constrain((int32_t)p.delay_ms + delta, 0, 10000);
+                            }
+                            lastEnc_l = cur_l;
+                            lastEnc_r = cur_r;
+                        }
                     }
                     break;
+                }
 
                 case 4: // Kp
                     if (btn_next()) { if (p.kp < 255) p.kp++; }
@@ -507,45 +542,57 @@ void menu_counter_edit(uint8_t cidx) {
                         if (btn_back()) { if (p.belok_r > -255) p.belok_r -= 5; }
                     }
                     break;
-                case 6: // Tick Encoder (C1+ only)
-                    {
-                        // edit_sub = 0 → sisi L aktif
-                        // edit_sub = 1 → sisi R aktif
+                case 6: {
+                    int32_t cur_l = encoderKiriRead();
+                    int32_t cur_r = encoderKananRead();
 
-                        // init sisi dari nilai Encd saat pertama masuk
-                        // (edit_sub sudah di-reset ke 0 saat highlight berubah, jadi cukup cek sekali)
-                        static int8_t enc6_init = -1;
-                        if (enc6_init != (int8_t)cidx) {
-                            edit_sub  = (p.Encd_r > 0 && p.Encd_l == 0) ? 1 : 0;
-                            enc6_init = (int8_t)cidx;
+                    // tentukan sisi aktif sekali di awal — jangan berubah kecuali btn_next
+                    static bool use_right = false;
+                    static int8_t last_cidx = -1;
+                    if (last_cidx != (int8_t)cidx) {
+                        use_right  = (p.Encd_r > 0 && p.Encd_l == 0);
+                        last_cidx  = (int8_t)cidx;
+                        lastEnc_l  = cur_l;
+                        lastEnc_r  = cur_r;
+                    }
+
+                    // btn_next: pindah sisi, bawa nilai
+                    if (btn_next()) {
+                        if (!use_right) {
+                            p.Encd_r  = p.Encd_l;
+                            p.Encd_l  = 0;
+                            use_right = true;
+                        } else {
+                            p.Encd_l  = p.Encd_r;
+                            p.Encd_r  = 0;
+                            use_right = false;
                         }
+                        lastEnc_l = cur_l;
+                        lastEnc_r = cur_r;
+                    }
 
-                        // baca delta encoder fisik — rata2 kedua roda
-                        int32_t cur_r = encoderKananRead();
-                        int32_t cur_l = encoderKiriRead();
-                        int32_t delta = ((cur_r - lastEnc_r) + (cur_l - lastEnc_l)) / 2;
-
-                        if (delta != 0) {
-                            if (edit_sub == 0) {
-                                // sisi L aktif
-                                p.Encd_l = (int16_t)constrain((int32_t)p.Encd_l + delta, 0, 10000);
-                                p.Encd_r = 0;
-                            } else {
-                                // sisi R aktif
-                                p.Encd_r = (int16_t)constrain((int32_t)p.Encd_r + delta, 0, 10000);
-                                p.Encd_l = 0;
-                            }
-                            lastEnc_r = cur_r;
+                    // ubah nilai 1:1 sesuai sisi aktif
+                    if (!use_right) {
+                        int32_t delta_l = cur_l - lastEnc_l;
+                        if (delta_l != 0) {
+                            p.Encd_l  = (int16_t)constrain((int32_t)p.Encd_l + delta_l, 0, 10000);
                             lastEnc_l = cur_l;
                         }
-
-                        // reset value ke 0 dengan btn_back
-                        if (btn_back()) {
-                            if (edit_sub == 0) p.Encd_l = 0;
-                            else               p.Encd_r = 0;
+                    } else {
+                        int32_t delta_r = cur_r - lastEnc_r;
+                        if (delta_r != 0) {
+                            p.Encd_r  = (int16_t)constrain((int32_t)p.Encd_r + delta_r, 0, 10000);
+                            lastEnc_r = cur_r;
                         }
                     }
+
+                    // btn_back: reset sisi aktif
+                    if (btn_back()) {
+                        if (!use_right) p.Encd_l = 0;
+                        else            p.Encd_r = 0;
+                    }
                     break;
+                }
                 case 7: // Line Counter Mode                   
                     uint8_t d = (uint8_t)p.Line_C;
                     if (btn_next()) { if (d < 11) d++; else d = 0; }    

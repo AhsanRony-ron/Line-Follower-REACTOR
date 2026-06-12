@@ -71,7 +71,7 @@
 
 // EEPROM
 #define EEPROM_DEVICE_ADDR  0x50
-#define EEPROM_SLOT_COUNT   15
+#define EEPROM_SLOT_COUNT   14
 
 // ─────────────────────────────────────────
 //  MULTIPLEXER LOOKUP TABLE

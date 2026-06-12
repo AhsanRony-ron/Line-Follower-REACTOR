@@ -68,6 +68,7 @@ struct __attribute__((packed)) CounterParam {
     int16_t   belok_r;      // PWM roda kanan saat belok/lost
     int16_t   Encd_l;       // Encoder Kiri
     int16_t   Encd_r;       // Encoder kanan
+    int16_t   Encd_b;       // Encoder belok
     LineCounterMode Line_C; // Mode penghitung garis
 };
 
@@ -110,7 +111,7 @@ struct __attribute__((packed)) GlobalConfig {
 #define DEFAULT_BELOK_L     60
 #define DEFAULT_BELOK_R     60
 #define DEFAULT_FREE_L      50
-#define DEFAULT_FREE_R      -50
+#define DEFAULT_FREE_R      50
 #define DEFAULT_LINE        LINE_AUTO
 #define DEFAULT_TRIGGER     TRIGGER_TIMER
 #define DEFAULT_DECISION    DEC_STOP
