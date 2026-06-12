@@ -351,6 +351,7 @@ Setiap counter (C0–C99) memiliki parameter berikut:
 | `belok_r` | `int16_t` | PWM roda kanan saat belok (-255 s/d 255) |
 | `Encd_l` | `int16_t` | Target tick encoder kiri |
 | `Encd_r` | `int16_t` | Target tick encoder kanan |
+| `Encd_d` | `int16_t` | Target tick encoder untuk belok (enc otomatis r/l)|
 | `Line_C` | `LineCounterMode` | Mode pembacaan garis per counter |
 
 > **Catatan:** Counter 0 (C0) hanya memiliki **Timer**, **Speed**, dan **Kp**. Parameter decision, trigger, dan belok hanya tersedia mulai C1.
