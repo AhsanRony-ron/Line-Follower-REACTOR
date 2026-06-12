@@ -444,7 +444,7 @@ pio run --target clean
 ## 📜 Lisensi
 
 Dibuat oleh **Ron** — *Created by Ron with salving 4 AI*
-And **Hakaisha** — *With only 1 AI, remember 1 AI 🤖!!! 🔥*
+And **Hakaisha** — *With only 1 AI, and just making this file*
 
 ---
 
