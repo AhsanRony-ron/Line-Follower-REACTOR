@@ -71,11 +71,15 @@ void disp_textf(uint8_t col, uint8_t row, const char* fmt, ...) {
 // highlight block putih (invert) pada area tertentu
 void disp_highlight(uint8_t row, bool active) {
     if (active) {
+        int8_t asc  = u8g2.getAscent();
+        int8_t desc = u8g2.getDescent();
+        uint8_t y   = ROW(row) - asc;
+        uint8_t h   = asc - desc;
         u8g2.setDrawColor(1);
-        u8g2.drawBox(0, ROW(row) - FONT_BASE + 2, OLED_WIDTH, FONT_H);
-        u8g2.setDrawColor(0);  // teks berikutnya jadi hitam
+        u8g2.drawBox(0, y, OLED_WIDTH, h);
+        u8g2.setDrawColor(0);
     } else {
-        u8g2.setDrawColor(1);  // teks normal putih
+        u8g2.setDrawColor(1);
     }
 }
 
@@ -261,12 +265,11 @@ void display_finish(unsigned long elapsed_ms) {
     u8g2.clearBuffer();
 
     u8g2.setFont(u8g2_font_spleen8x16_mr);  // set font DULU
-    disp_text(2, 0, "FINISH!");
+    disp_text(6, 1, "FINISH!");
 
+
+    disp_textf(4, 3, "%02d:%02d.%02ds", min_val, sec_val, ms_val);
     u8g2.setFont(u8g2_font_spleen6x12_mr);   // kembali ke font normal
-    disp_text(0, 2, "Time:");
-    disp_textf(0, 3, "%02d:%02d.%02ds", min_val, sec_val, ms_val);
-
     u8g2.sendBuffer();
 }
 

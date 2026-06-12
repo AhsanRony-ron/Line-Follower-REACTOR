@@ -165,20 +165,20 @@ uint8_t screen_standby() {
     wait_release();
 
     while (true) {
-        // throttle display 100ms — biar tombol responsif
         unsigned long now = millis();
-        if (now - last_disp >= 100) {
+        bool just_displayed = false;
+
+        if (now - last_disp >= 50) {
             scan_sensor_bar();
             float volt = read_voltage();
             display_standby(cp_sel, volt, g_config.mem_slot);
             last_disp = now;
+            just_displayed = true;
         }
 
-        if (btn_up()) {
-            if (cp_sel < CP_MAX) cp_sel++; 
-        }
-        if (btn_down()) {
-            if (cp_sel > 0) cp_sel--;
+        if (!just_displayed) {
+            if (btn_up())   { if (cp_sel < CP_MAX) cp_sel++; }
+            if (btn_down()) { if (cp_sel > 0) cp_sel--; }
         }
 
         // SAVE = START
