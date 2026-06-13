@@ -106,7 +106,7 @@ bool cek_flag_cond(bool is_mirrored) {
 
     // flag_cond=1: belok kanan → tunggu sensor KIRI aktif
     if (g_flag_cond == 1 && (g_sensor_out & 0x0007) != 0) {
-        g_pv_out     = is_mirrored ? -24 : 24;
+        g_pv_out     = -24;
         g_error      = -g_pv_out;
         g_last_error =  g_error;
         g_flag_cond  = 0;
@@ -115,7 +115,7 @@ bool cek_flag_cond(bool is_mirrored) {
 
     // flag_cond=2: belok kiri → tunggu sensor KANAN aktif
     if (g_flag_cond == 2 && (g_sensor_out & 0x3800) != 0) {
-        g_pv_out     = is_mirrored ? 24 : -24;  
+        g_pv_out     = 24;  
         g_error      = -g_pv_out;
         g_last_error =  g_error;
         g_flag_cond  = 0;
@@ -270,18 +270,19 @@ bool eksekusi_decision(CounterParam& p, bool is_mirrored, unsigned long elapsed_
             int16_t target = resolve_encd(fl, fr, p.Encd_l, p.Encd_r, is_mirrored);
 
             if (target > 0) {
-                    int16_t el = is_mirrored ? p.Encd_r : p.Encd_l;
-                    bool use_left = (el > 0);
+                bool use_left = is_mirrored ? (p.Encd_r > 0 ? false : true)
+                                            : (p.Encd_l > 0);
 
-                    if (use_left) encoderKiriReset();
-                    else          encoderKananReset();
-                    int32_t start = 0;
-                    while (true) {
-                        int32_t now = use_left ? abs(encoderKiriRead()) : abs(encoderKananRead());
-                        if ((now - start) >= target) break;
-                        led_lcd(false);
-                        led_timer((read_timer() / 5) % 2 == 1);
-                        set_motors(fl, fr, DEFAULT_MAX_PWM);
+                if (use_left) encoderKiriReset();
+                else          encoderKananReset();
+
+                int32_t start = 0;
+                while (true) {
+                    int32_t now = use_left ? abs(encoderKiriRead()) : abs(encoderKananRead());
+                    if ((now - start) >= target) break;
+                    led_lcd(false);
+                    led_timer((read_timer() / 5) % 2 == 1);
+                    set_motors(fl, fr, DEFAULT_MAX_PWM);
                 }
             } else {
                 int free_start = read_timer();
@@ -312,7 +313,7 @@ bool eksekusi_decision(CounterParam& p, bool is_mirrored, unsigned long elapsed_
                         led_lcd(true);
                         led_timer((read_timer() / 5) % 2 == 1);
                         scan_sensor();
-                        if (g_sensor_out != 0) g_pv_out = input_error(g_sensor_out);
+                        if (g_sensor_out != 0) g_pv_out = input_error(g_sensor_out, is_mirrored);
                         g_error = -g_pv_out;
                         calc_pid(p.kp, g_config.kd);
                         g_LOUT = constrain((int)p.speed2 + g_out_p + g_out_d, -255, 255);
@@ -329,7 +330,7 @@ bool eksekusi_decision(CounterParam& p, bool is_mirrored, unsigned long elapsed_
                     led_timer((read_timer() / 5) % 2 == 1);
                     uint8_t spd = ramp_speed(p.speed1, p.speed2, read_timer(), p.timer);
                     scan_sensor();
-                    if (g_sensor_out != 0) g_pv_out = input_error(g_sensor_out);
+                    if (g_sensor_out != 0) g_pv_out = input_error(g_sensor_out, is_mirrored);
                     g_error = -g_pv_out;
                     calc_pid(p.kp, g_config.kd);
                     g_LOUT = constrain((int)spd + g_out_p + g_out_d, -255, 255);
@@ -345,7 +346,7 @@ bool eksekusi_decision(CounterParam& p, bool is_mirrored, unsigned long elapsed_
                     led_lcd(true);
                     led_timer((read_timer() / 5) % 2 == 1);
                     scan_sensor();
-                    if (g_sensor_out != 0) g_pv_out = input_error(g_sensor_out);
+                    if (g_sensor_out != 0) g_pv_out = input_error(g_sensor_out, is_mirrored);
                     g_error = -g_pv_out;
                     calc_pid(p.kp, g_config.kd);
                     g_LOUT = constrain((int)p.speed2 + g_out_p + g_out_d, -255, 255);
@@ -491,7 +492,7 @@ bool mode_counter(uint8_t cp_start) {
             // cek_flag_cond : cek apakah seek selesai (robot nemu garis setelah belok)
             // calc_pid      : hitung output PID dari g_error
             scan_sensor();
-            if (g_sensor_out != 0) g_pv_out = input_error(g_sensor_out);
+            if (g_sensor_out != 0) g_pv_out = input_error(g_sensor_out, is_mirrored);
 
             bool seeking = (g_flag_cond != 0);
             bool found   = cek_flag_cond(is_mirrored);
@@ -605,7 +606,7 @@ bool mode_counter(uint8_t cp_start) {
         // ─────────────────────────────────────────
         while (g_flag_cond != 0) {
             scan_sensor();
-            if (g_sensor_out != 0) g_pv_out = input_error(g_sensor_out);
+            if (g_sensor_out != 0) g_pv_out = input_error(g_sensor_out, is_mirrored);
 
             bool found = cek_flag_cond(is_mirrored);
 

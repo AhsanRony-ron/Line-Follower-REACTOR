@@ -107,7 +107,7 @@ struct __attribute__((packed)) GlobalConfig {
 #define DEFAULT_KP          5
 #define DEFAULT_KD          100
 #define DEFAULT_TIMER       10      
-#define DEFAULT_DELAY_MS    50
+#define DEFAULT_DELAY_MS    100
 #define DEFAULT_BELOK_L     60
 #define DEFAULT_BELOK_R     60
 #define DEFAULT_FREE_L      50

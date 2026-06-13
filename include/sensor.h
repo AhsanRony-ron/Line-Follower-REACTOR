@@ -317,9 +317,14 @@ int input_error_right(uint16_t s) {
     }
 }
 
-int input_error(uint16_t s) {
+int input_error(uint16_t s, bool is_mirrored = false) {
     int result;
-    switch (g_mode_flag) {
+    uint8_t mode = g_mode_flag;
+    if (is_mirrored) {
+        if (mode == 3) mode = 4;
+        else if (mode == 4) mode = 3;
+    }
+    switch (mode) {
         case 1: result =  input_error_thin(s);  break;
         case 2: result = -input_error_thick(s); break;
         case 3: result = -input_error_left(s);  break;

@@ -486,29 +486,23 @@ void menu_counter_edit(uint8_t cidx) {
                     static bool enc_mode  = false;
                     static int8_t init_cidx = -1;
                     if (init_cidx != (int8_t)cidx) {
-                        enc_mode  = (p.Encd_b > 0);  // init dari nilai yang ada
+                        enc_mode  = (p.Encd_b > 0);
                         init_cidx = (int8_t)cidx;
                         lastEnc_l = encoderKiriRead();
                         lastEnc_r = encoderKananRead();
                     }
 
                     if (edit_sub == 0) {
+                        // toggle DELAY_A / DELAY_B
                         if (btn_next() || btn_back()) {
                             p.delay_type = (p.delay_type == DELAY_A) ? DELAY_B : DELAY_A;
                         }
                     } else {
-                        // toggle mode
-                        if (btn_next()) {
-                            enc_mode = !enc_mode;
-                        }
+                        // ── TIMER: next/back naik turun delay_ms ──
+                        if (btn_next()) { if (p.delay_ms < 10000) p.delay_ms += 10; }
+                        if (btn_back()) { if (p.delay_ms >= 10)   p.delay_ms -= 10; else p.delay_ms = 0; }
 
-                        // reset nilai aktif
-                        if (btn_back()) {
-                            if (enc_mode) p.Encd_b  = 0;
-                            else          p.delay_ms = 0;
-                        }
-
-                        // encoder fisik
+                        // ── ENCODER FISIK: hanya update Encd_b ──
                         int32_t cur_l   = encoderKiriRead();
                         int32_t cur_r   = encoderKananRead();
                         int32_t delta_l = cur_l - lastEnc_l;
@@ -516,14 +510,16 @@ void menu_counter_edit(uint8_t cidx) {
                         int32_t delta   = (delta_l != 0) ? delta_l : delta_r;
 
                         if (delta != 0) {
-                            if (enc_mode) {
-                                p.Encd_b   = (int16_t)constrain((int32_t)p.Encd_b   + delta,      0, 10000);
-                            } else {
-                                p.delay_ms = (uint16_t)constrain((int32_t)p.delay_ms + delta, 0, 10000);
-                            }
+                            p.Encd_b  = (int16_t)constrain((int32_t)p.Encd_b + delta, 0, 10000);
                             lastEnc_l = cur_l;
                             lastEnc_r = cur_r;
                         }
+
+                        // ── AUTO MODE: Encd_b > 0 = encoder, else = timer ──
+                        enc_mode = (p.Encd_b > 0);
+
+                        // reset Encd_b dengan tahan back + enc tidak bergerak
+                        // (opsional: bisa pakai btn_x jika tersedia di konteks ini)
                     }
                     break;
                 }
