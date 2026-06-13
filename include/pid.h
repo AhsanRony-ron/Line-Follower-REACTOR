@@ -21,8 +21,14 @@ const int PID_SP = 0;
 //  KALKULASI PID
 // ─────────────────────────────────────────
 void calc_pid(uint8_t kp, uint8_t kd) {
-    g_out_p      = g_error * kp;
-    g_out_d      = (g_error - g_last_error) * kd;
+    static unsigned long lastTime = 0;
+    unsigned long now = millis();
+    float dt = (now - lastTime) / 1000.0f;
+    if (dt <= 0.0f || dt > 0.1f) dt = 0.01f;  // guard: max 100ms, default 10ms
+    lastTime = now;
+
+    g_out_p      = g_error * (int)kp;
+    g_out_d      = (int)((g_error - g_last_error) * (int)kd / dt);
     g_last_error = g_error;
 }
 

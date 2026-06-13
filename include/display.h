@@ -510,7 +510,7 @@ void display_counter(uint8_t counter_idx, uint8_t scroll, uint8_t highlight,
                 break;
             }
             case 5:
-                u8g2.print("Blk:");
+                u8g2.print("Turn:");
                 if (edit_mode && active && edit_sub == 0) u8g2.print("[");
                 snprintf(buf, sizeof(buf), "L:%-4d", p.belok_l);
                 u8g2.print(buf);
