@@ -66,8 +66,8 @@ float read_voltage() {
 
 uint8_t batt_percent(float voltage) {
     if (voltage >= 12.6f) return 100;
-    if (voltage <= 9.9f)  return 0;
-    return (uint8_t)((voltage - 9.9f) / 2.7f * 100.0f);
+    if (voltage <= 10.5f) return 0;
+    return (uint8_t)((voltage - 10.5f) / 2.1f * 100.0f);
 }
 
 void isrKiriA() {

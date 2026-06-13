@@ -464,7 +464,6 @@ bool mode_counter(uint8_t cp_start) {
             // tentukan encoder sisi mana yang dipakai untuk cur
             // prioritas: Encd_l dulu, kalau 0 pakai Encd_r
             // mirror: swap sisi
-            bool cur_use_left = (is_mirrored ? cur.Encd_r : cur.Encd_l) > 0 ||(cur.Encd_l == 0 && cur.Encd_r == 0);  // default L kalau keduanya 0
 
             int32_t enc_now = (cur_use_left ? encoderKiriRead() : encoderKananRead()) - enc_counter_start;
 

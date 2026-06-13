@@ -11,7 +11,15 @@
 //  analogWriteResolution(8) dipanggil di setup() → range 0-255
 // ─────────────────────────────────────────
 
+inline int compensate_pwm(int pwm_raw) {
+    if (g_volt_filtered < 0.5f) return pwm_raw;
+    float scale = constrain(11.8f / g_volt_filtered, 0.7f, 1.3f);
+    return constrain((int)(pwm_raw * scale), -255, 255);
+}
+
 void set_motors(int lpwm, int rpwm, uint8_t maxpwm) {
+    lpwm = compensate_pwm(lpwm);
+    rpwm = compensate_pwm(rpwm);
     // clamp maxpwm
     if (maxpwm > PWM_MAX) maxpwm = PWM_MAX;
     if (maxpwm < 0)       maxpwm = 0;
