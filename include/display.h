@@ -418,6 +418,85 @@ const char* disp_trigger_name(uint16_t trigger) {
 // 7: Line Counter Mode (C1+)
 #define COUNTER_ITEM_COUNT 8
 
+static bool item_visible(uint8_t item_idx, Decision dec, uint16_t trigger, 
+                         int16_t encd_l, int16_t encd_r, int16_t encd_b) {
+    bool has_encd    = (encd_l > 0 || encd_r > 0);
+    bool has_encd_b  = (encd_b > 0);
+    bool tick_trigger = (trigger == TRIGGER_TICK);
+    bool timer_trigger = (trigger == TRIGGER_TIMER);
+
+    switch (dec) {
+        case DEC_LOST:
+            switch (item_idx) {
+                case 0: return true;   // Dec+Trigger
+                case 1: return !tick_trigger;   // Timer
+                case 2: return true;   // Speed
+                case 4: return true;   // Kp
+                case 6: return !timer_trigger;   // Encoder 
+                case 7: return true;   // Line
+                default: return false;
+            }
+
+        case DEC_FREE:
+            switch (item_idx) {
+                case 0: return true;                    // Dec+Trigger
+                case 1: return !tick_trigger;           // Timer
+                case 2: return true;                    // Speed
+                case 4: return true;                    // Kp
+                case 5: return true;                    // PWM Motor
+                case 6: return !timer_trigger;          // Encoder L/R
+                case 7: return true;                    // Line
+                default: return false;
+            }
+
+        case DEC_BELOK_KANAN:
+        case DEC_BELOK_KIRI:
+            switch (item_idx) {
+                case 0: return true;                    // Dec+Trigger
+                case 1: return !tick_trigger;           // Timer
+                case 2: return true;                    // Speed
+                case 3: return true;                    // Delay type + durasi (E atau T)
+                case 4: return true;                    // Kp
+                case 5: return true;                    // Motor PWM
+                case 6: return !timer_trigger; // Encoder — show kalau TICK atau ada nilai encd_b
+                case 7: return true;                    // Line
+                default: return false;
+            }
+
+        case DEC_STOP:
+            switch (item_idx) {
+                case 0: return true;                    // Dec+Trigger
+                case 1: return !tick_trigger;           // Timer — hide kalau TICK
+                case 2: return true;                    // Speed
+                case 4: return true;                    // Kp
+                case 6: return !timer_trigger; // Encoder — show kalau TICK atau ada nilai
+                case 7: return true;                    // Line
+                default: return false;
+            }
+
+        default:
+            return true;
+    }
+}
+
+
+// BARU — isi yang benar:
+static inline uint8_t build_visible_items(uint8_t* out, Decision dec, uint16_t trigger,
+                                           int16_t encd_l, int16_t encd_r, int16_t encd_b,
+                                           bool is_c0) {
+    static const uint8_t c0_map[] = {1, 2, 4, 6};
+    uint8_t count = 0;
+
+    for (uint8_t i = 0; i < (is_c0 ? 4 : COUNTER_ITEM_COUNT); i++) {
+        uint8_t real_idx = is_c0 ? c0_map[i] : i;
+        if (is_c0 || item_visible(real_idx, dec, trigger, encd_l, encd_r, encd_b)) {
+            out[count++] = real_idx;
+        }
+    }
+
+    return count;
+}
+
 void display_counter(uint8_t counter_idx, uint8_t scroll, uint8_t highlight,
                      CounterParam& p, bool edit_mode = false, uint8_t edit_sub = 0, GlobalConfig& cfg = g_config) {
     u8g2.clearBuffer();
@@ -427,23 +506,22 @@ void display_counter(uint8_t counter_idx, uint8_t scroll, uint8_t highlight,
     disp_textf(0, 0, "C:%03d", counter_idx);
     if (highlight == 0) disp_color_reset();
 
-    // baris 1-5: parameter scroll
-    // C0 khusus: hanya Timer(1), Speed(2), Kp(4) → remapping ke index 0,1,2
-    // C1+: semua item normal tanpa free PWM terpisah
+
     bool is_c0 = (counter_idx == 0);
-    uint8_t max_idx = is_c0 ? 4 : COUNTER_ITEM_COUNT;
+    const uint8_t c0_map[] = {1, 2, 4, 6};
 
-    // lookup index item C0: 0→Timer(1), 1→Speed(2), 2→Kp(4), 3→Encoder(6)
-    const uint8_t c0_map[] = {1, 2, 4, 6}; 
-
+    uint8_t visible_items[COUNTER_ITEM_COUNT];
+    uint8_t visible_count = build_visible_items(
+        visible_items, p.decision, p.trigger,
+        p.Encd_l, p.Encd_r, p.Encd_b, is_c0
+    );
+    
     for (uint8_t i = 0; i < 6; i++) {
         uint8_t idx_raw = scroll + i;
-        if (idx_raw >= max_idx) break;
+        if (idx_raw >= visible_count) break;
 
         // remapping index untuk C0
-        uint8_t idx = is_c0 ? c0_map[idx_raw] : idx_raw;
-
-        if (!is_c0 && idx >= COUNTER_ITEM_COUNT) break;
+        uint8_t idx = visible_items[idx_raw];
 
         uint8_t row = i + 1;
         bool active = (highlight > 0) && (idx_raw == highlight - 1);  // pakai idx_raw bukan idx
@@ -510,14 +588,14 @@ void display_counter(uint8_t counter_idx, uint8_t scroll, uint8_t highlight,
                 break;
             }
             case 5:
-                u8g2.print("Turn:");
+                u8g2.print("Motor:");
                 if (edit_mode && active && edit_sub == 0) u8g2.print("[");
-                snprintf(buf, sizeof(buf), "L:%-4d", p.belok_l);
+                snprintf(buf, sizeof(buf), "L:%-4d", p.motor_l);
                 u8g2.print(buf);
                 if (edit_mode && active && edit_sub == 0) u8g2.print("]");
                 u8g2.print(" ");
                 if (edit_mode && active && edit_sub == 1) u8g2.print("[");
-                snprintf(buf, sizeof(buf), "R:%-4d", p.belok_r);
+                snprintf(buf, sizeof(buf), "R:%-4d", p.motor_r);
                 u8g2.print(buf);
                 if (edit_mode && active && edit_sub == 1) u8g2.print("]");
                 break;

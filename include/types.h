@@ -64,8 +64,8 @@ struct __attribute__((packed)) CounterParam {
     Decision  decision;     // aksi yang dieksekusi
     DelayType delay_type;   // A atau B
     uint16_t  delay_ms;     // durasi delay (pure ms)
-    int16_t   belok_l;      // PWM roda kiri saat belok/lost
-    int16_t   belok_r;      // PWM roda kanan saat belok/lost
+    int16_t   motor_l;      // PWM roda kiri saat belok/lost
+    int16_t   motor_r;      // PWM roda kanan saat belok/lost
     int16_t   Encd_l;       // Encoder Kiri
     int16_t   Encd_r;       // Encoder kanan
     int16_t   Encd_b;       // Encoder belok
@@ -108,15 +108,15 @@ struct __attribute__((packed)) GlobalConfig {
 #define DEFAULT_KD          100
 #define DEFAULT_TIMER       10      
 #define DEFAULT_DELAY_MS    100
-#define DEFAULT_BELOK_L     60
-#define DEFAULT_BELOK_R     60
+#define DEFAULT_MOTOR_L     60
+#define DEFAULT_MOTOR_R     60
 #define DEFAULT_FREE_L      50
 #define DEFAULT_FREE_R      50
 #define DEFAULT_LINE        LINE_AUTO
 #define DEFAULT_TRIGGER     TRIGGER_TIMER
 #define DEFAULT_DECISION    DEC_STOP
 #define DEFAULT_DELAY_TYPE  DELAY_A
-#define DEFAULT_PWM_FREQ    0.5f
+#define DEFAULT_PWM_FREQ    10.0f
 #define DEFAULT_PERIODE     10
 #define DEFAULT_LINE_COUNTER   AUTO_NORMAL
 

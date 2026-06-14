@@ -69,6 +69,11 @@ inline int16_t resolve_encd(int16_t actual_l, int16_t actual_r,
                              bool is_mirrored) {
     int16_t el = is_mirrored ? encd_r : encd_l;
     int16_t er = is_mirrored ? encd_l : encd_r;
+
+    if (actual_l > 0 && actual_r > 0) {
+        return (el > 0) ? el : er;  // ambil yang ada
+    }
+
     return (actual_l > 0) ? el : er;
 }
 
@@ -149,7 +154,7 @@ void eksekusi_belok(int16_t actual_l, int16_t actual_r, uint16_t delay_ms, int16
         if (use_left) encoderKiriReset();
         else          encoderKananReset();
 
-        int32_t start = 0;  // setelah reset selalu 0
+        int32_t start = use_left ? abs(encoderKiriRead()) : abs(encoderKananRead());
         while (true) {
             set_motors(actual_l, actual_r, DEFAULT_MAX_PWM);
             int32_t now = use_left ? abs(encoderKiriRead()) : abs(encoderKananRead());
@@ -242,8 +247,8 @@ bool eksekusi_decision(CounterParam& p, bool is_mirrored, unsigned long elapsed_
             break;
 
         case DEC_BELOK_KANAN: {
-            int16_t l =  (int16_t)p.belok_l;
-            int16_t r = -(int16_t)p.belok_r;
+            int16_t l =  (int16_t)p.motor_l;
+            int16_t r = -(int16_t)p.motor_r;
             if (is_mirrored) { int16_t tmp = l; l = r; r = tmp; }
             if (p.delay_type == DELAY_A) {
                 eksekusi_belok(l, r, p.delay_ms, p.Encd_b);
@@ -253,8 +258,8 @@ bool eksekusi_decision(CounterParam& p, bool is_mirrored, unsigned long elapsed_
             break;
         }
         case DEC_BELOK_KIRI: {
-            int16_t l = -(int16_t)p.belok_l;
-            int16_t r =  (int16_t)p.belok_r;
+            int16_t l = -(int16_t)p.motor_l;
+            int16_t r =  (int16_t)p.motor_r;
             if (is_mirrored) { int16_t tmp = l; l = r; r = tmp; }
             if (p.delay_type == DELAY_A) {
                 eksekusi_belok(l, r, p.delay_ms, p.Encd_b);
@@ -265,21 +270,20 @@ bool eksekusi_decision(CounterParam& p, bool is_mirrored, unsigned long elapsed_
         }
 
         case DEC_FREE: {
-            int16_t fl = is_mirrored ? (int16_t)p.belok_r : (int16_t)p.belok_l;
-            int16_t fr = is_mirrored ? (int16_t)p.belok_l : (int16_t)p.belok_r;
+            int16_t fl = is_mirrored ? (int16_t)p.motor_r : (int16_t)p.motor_l;
+            int16_t fr = is_mirrored ? (int16_t)p.motor_l : (int16_t)p.motor_r;
             int16_t target = resolve_encd(fl, fr, p.Encd_l, p.Encd_r, is_mirrored);
 
-            if (target > 0) {
+            if (p.trigger == TRIGGER_TICK || target > 0) {
                 bool use_left = is_mirrored ? (p.Encd_r > 0 ? false : true)
-                                            : (p.Encd_l > 0);
+                            : (p.Encd_l > 0);
 
-                if (use_left) encoderKiriReset();
-                else          encoderKananReset();
+                int32_t start = use_left ? encoderKiriRead() : encoderKananRead();
 
-                int32_t start = 0;
                 while (true) {
-                    int32_t now = use_left ? abs(encoderKiriRead()) : abs(encoderKananRead());
-                    if ((now - start) >= target) break;
+                    int32_t now = use_left ? encoderKiriRead() : encoderKananRead();
+                    if (abs(now - start) >= target) break;
+
                     led_lcd(false);
                     led_timer((read_timer() / 5) % 2 == 1);
                     set_motors(fl, fr, DEFAULT_MAX_PWM);
@@ -437,7 +441,7 @@ bool mode_counter(uint8_t cp_start) {
         CounterParam& nxt = g_counter[cidx + 1];
 
         bool is_mirrored = g_config.mirrored;
-        bool skip_cur_timer = is_cp_resume && (cidx == start_counter);
+        bool skip_cur = is_cp_resume && (cidx == start_counter); 
 
         // ── DURASI COUNTER CUR ──
         // cur_tick_target > 0 → durasi pakai encoder (Encd_l atau Encd_r)
@@ -505,7 +509,7 @@ bool mode_counter(uint8_t cp_start) {
             // Kalau normal/sudah nemu garis →
             //   set motor PID following
             if (seeking && !found) {
-                set_motor_seek(cur.belok_l, cur.belok_r);
+                set_motor_seek(cur.motor_l, cur.motor_r);
             } else {
                 g_LOUT = constrain((int)spd + g_out_p + g_out_d, -255, 255);
                 g_ROUT = constrain((int)spd - g_out_p - g_out_d, -255, 255);
@@ -556,10 +560,10 @@ bool mode_counter(uint8_t cp_start) {
             // Tidak cek saat seeking — tunggu robot lurus dulu
             // Alur: tunggu waktu habis → tunggu sensor bersih → akumulasi sensor → match
             } else if (!seeking) {
-                bool waktu_habis = skip_cur_timer ? true :  // langsung habis
+                bool waktu_habis = skip_cur ? true :
                     (cur_tick_target > 0)
-                        ? (enc_now >= cur_tick_target)
-                        : (t >= cur.timer);
+                    ? (enc_now >= cur_tick_target)
+                    : (t >= cur.timer);
 
                 if (waktu_habis) {
                     // Reset akumulasi sekali saat pertama kali waktu habis
@@ -613,7 +617,7 @@ bool mode_counter(uint8_t cp_start) {
             calc_pid(nxt.kp, g_config.kd);
 
             if (g_flag_cond != 0) {
-                set_motor_seek(nxt.belok_l, nxt.belok_r);
+                set_motor_seek(nxt.motor_l, nxt.motor_r);
             } else {
                 g_LOUT = constrain((int)nxt.speed2 + g_out_p + g_out_d, -255, 255);
                 g_ROUT = constrain((int)nxt.speed2 - g_out_p - g_out_d, -255, 255);

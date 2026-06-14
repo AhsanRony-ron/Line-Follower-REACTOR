@@ -18,6 +18,12 @@ inline int compensate_pwm(int pwm_raw) {
 }
 
 void set_motors(int lpwm, int rpwm, uint8_t maxpwm) {
+    if (g_batt_low) {
+        // matikan semua motor
+        analogWrite(PIN_LPWM1, 0); analogWrite(PIN_LPWM2, 0);
+        analogWrite(PIN_RPWM1, 0); analogWrite(PIN_RPWM2, 0);
+        return;
+    }
     lpwm = compensate_pwm(lpwm);
     rpwm = compensate_pwm(rpwm);
     // clamp maxpwm

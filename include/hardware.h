@@ -65,8 +65,9 @@ float read_voltage() {
 }
 
 uint8_t batt_percent(float voltage) {
-    if (voltage >= 12.6f) return 100;
-    if (voltage <= 10.5f) return 0;
+    if (voltage >= 12.6f) { g_batt_low = false; return 100; }
+    if (voltage <= 10.5f) { g_batt_low = true;  return 0;   }
+    g_batt_low = false;
     return (uint8_t)((voltage - 10.5f) / 2.1f * 100.0f);
 }
 

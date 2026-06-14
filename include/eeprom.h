@@ -283,8 +283,8 @@ void load_defaults() {
         g_counter[i].decision   = DEFAULT_DECISION;
         g_counter[i].delay_type = DEFAULT_DELAY_TYPE;
         g_counter[i].delay_ms   = DEFAULT_DELAY_MS;
-        g_counter[i].belok_l    = DEFAULT_BELOK_L;
-        g_counter[i].belok_r    = DEFAULT_BELOK_R;
+        g_counter[i].motor_l    = DEFAULT_MOTOR_L;
+        g_counter[i].motor_r    = DEFAULT_MOTOR_R;
         g_counter[i].Encd_l     = 0;
         g_counter[i].Encd_r     = 0;
         g_counter[i].Encd_b     = 0;

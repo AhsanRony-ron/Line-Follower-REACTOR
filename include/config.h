@@ -88,3 +88,5 @@ volatile int32_t countKiri  = 0;
 volatile int32_t countKanan = 0;
 
 uint8_t tick_period;  // PID dihitung setiap N tick encoder
+
+bool g_batt_low = false; 

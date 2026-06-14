@@ -385,16 +385,19 @@ void menu_counter_edit(uint8_t cidx) {
 
         // C0: hanya 3 item (Timer, Speed, Kp)
         // C1+: normal 6 item
-        uint8_t max_item = is_c0 ? 4 : 8;
-
-        if (highlight > max_item) highlight = max_item;
+    uint8_t visible_items[COUNTER_ITEM_COUNT];
+    uint8_t visible_count = build_visible_items(
+        visible_items, p.decision, p.trigger,
+        p.Encd_l, p.Encd_r, p.Encd_b, is_c0
+    );
+    uint8_t max_item = visible_count;
 
         display_counter(cidx, scroll, highlight, p, true, edit_sub);
 
         // ── UP ──
         if (btn_up()) {
             if (highlight == 0) {
-                if (cidx > 0) {scroll = 0; highlight = 0; edit_sub = 0; }
+                if (cidx > 0) { scroll = 0; highlight = 0; edit_sub = 0; }
             } else if (highlight == 1) {
                 highlight = 0;
                 edit_sub  = 0;
@@ -404,14 +407,13 @@ void menu_counter_edit(uint8_t cidx) {
                 edit_sub = 0;
             }
         }
-
         // ── DOWN ──
         if (btn_down()) {
-            if (highlight == 0) {
+            if (highlight == 0 && visible_count > 0) {
                 highlight = 1;
                 scroll    = 0;
                 edit_sub  = 0;
-            } else if (highlight < max_item) {
+            } else if (highlight < visible_count) {  // ← ganti max_item jadi visible_count
                 highlight++;
                 if (highlight - 1 >= scroll + 5) scroll = highlight - 5;
                 edit_sub = 0;
@@ -428,9 +430,10 @@ void menu_counter_edit(uint8_t cidx) {
                     edit_sub = 0;
                 }
             } else {
-                switch (highlight) {
-                    case 0: case 2: case 5:   // C, Timer, Kp: tidak ada sub
-                        edit_sub = 0;
+                uint8_t item = visible_items[highlight - 1];
+                switch (item) {
+                    case 0: case 1: case 4: case 7:  // Dec+Trigger punya sub, Timer/Kp/Line tidak
+                        edit_sub = (item == 0) ? !edit_sub : 0;
                         break;
                     default:
                         edit_sub = !edit_sub;
@@ -450,7 +453,7 @@ void menu_counter_edit(uint8_t cidx) {
         } else {
             // konversi highlight ke item index
             // C0: pakai c0_map, C1+: langsung highlight-1
-            uint8_t item = is_c0 ? c0_map[highlight - 1] : (highlight - 1);
+            uint8_t item = is_c0 ? c0_map[highlight - 1] : visible_items[highlight - 1];
 
             switch (item) {
                 case 0: // Decision & Trigger (C1+ only)
@@ -529,13 +532,13 @@ void menu_counter_edit(uint8_t cidx) {
                     if (btn_back()) { if (p.kp > 0)   p.kp--; }
                     break;
 
-                case 5: // Belok PWM L & R
+                case 5: // Motor PWM L & R
                     if (edit_sub == 0) {
-                        if (btn_next()) { if (p.belok_l < 255)  p.belok_l += 5; }
-                        if (btn_back()) { if (p.belok_l > -255) p.belok_l -= 5; }
+                        if (btn_next()) { if (p.motor_l < 255)  p.motor_l += 5; }
+                        if (btn_back()) { if (p.motor_l > -255) p.motor_l -= 5; }
                     } else {
-                        if (btn_next()) { if (p.belok_r < 255)  p.belok_r += 5; }
-                        if (btn_back()) { if (p.belok_r > -255) p.belok_r -= 5; }
+                        if (btn_next()) { if (p.motor_r < 255)  p.motor_r += 5; }
+                        if (btn_back()) { if (p.motor_r > -255) p.motor_r -= 5; }
                     }
                     break;
                 case 6: {
@@ -597,7 +600,8 @@ void menu_counter_edit(uint8_t cidx) {
                     break;
             }
         }
-
+        if (highlight > visible_count) highlight = visible_count;
+        if (scroll > 0 && scroll >= visible_count) scroll = visible_count > 0 ? visible_count - 1 : 0;
         // ── SAVE ──
         if (btn_save()) {
             eeprom_save_counter(g_config.mem_slot);
@@ -605,6 +609,7 @@ void menu_counter_edit(uint8_t cidx) {
             delay(800);
             return;
         }
+
     }
 }
 
