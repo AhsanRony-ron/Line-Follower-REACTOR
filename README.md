@@ -4,6 +4,14 @@ Firmware robot **Line Follower** tingkat kompetisi berbasis mikrokontroler **STM
 
 ---
 
+## ⚠️ IMPORTANT
+
+Jika ingin melihat dokumentasi cara setting counter mode, bisa di cek file `usage-docs.md`.
+di README ini tidak ada penjelasan mengenai cara setting counter mode.
+
+---
+
+
 ## 📑 Daftar Isi
 
 - [Fitur Utama](#-fitur-utama)
