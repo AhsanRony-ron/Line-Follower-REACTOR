@@ -224,38 +224,6 @@ void eeprom_copy_slot(uint8_t src, uint8_t dst) {
 }
 
 // ─────────────────────────────────────────
-//  DELETE SLOT
-//  Isi slot dengan 0xFF (EEPROM blank state)
-// ─────────────────────────────────────────
-
-void eeprom_delete_slot(uint8_t slot) {
-    uint8_t buf[64];
-    memset(buf, 0xFF, 64);
-    
-    uint16_t base = slot_base(slot);
-    uint16_t total = EEPROM_SLOT_SIZE;
-    uint16_t offset = 0;
-    
-    while (offset < total) {
-        uint16_t chunk = min((uint16_t)64, (uint16_t)(total - offset));
-        eeprom_write_block(base + offset, buf, chunk);
-        offset += chunk;
-    }
-}
-
-// ─────────────────────────────────────────
-//  RESET TOTAL
-//  Hapus semua slot (isi semua 0xFF)
-//  Optimized: page write untuk kecepatan
-// ─────────────────────────────────────────
-
-void eeprom_reset_all() {
-    for (uint8_t s = 0; s < EEPROM_SLOT_COUNT; s++) {
-        eeprom_delete_slot(s);
-    }
-}
-
-// ─────────────────────────────────────────
 //  LOAD DEFAULT
 //  Isi g_config & g_counter dengan nilai default
 //  (dipakai saat EEPROM kosong / setelah reset)
@@ -300,6 +268,40 @@ void load_defaults() {
         g_sensor_thresh[i] = 128;
     }
 }
+
+// ─────────────────────────────────────────
+//  DELETE SLOT
+//  Isi slot dengan 0xFF (EEPROM blank state)
+// ─────────────────────────────────────────
+
+void eeprom_delete_slot(uint8_t slot) {
+    GlobalConfig    backup_config = g_config;
+    CounterParam    backup_counter[COUNTER_MAX];
+    memcpy(backup_counter, g_counter, sizeof(g_counter));
+    CheckpointParam backup_cp[CP_MAX];
+    memcpy(backup_cp, g_checkpoint, sizeof(g_checkpoint));
+
+    load_defaults();
+    g_config.mem_slot = slot;
+    eeprom_save_all(slot);
+
+    g_config = backup_config;
+    memcpy(g_counter,    backup_counter, sizeof(g_counter));
+    memcpy(g_checkpoint, backup_cp,      sizeof(g_checkpoint));
+}
+// ─────────────────────────────────────────
+//  RESET TOTAL
+//  Hapus semua slot (isi semua 0xFF)
+//  Optimized: page write untuk kecepatan
+// ─────────────────────────────────────────
+
+void eeprom_reset_all() {
+    for (uint8_t s = 0; s < EEPROM_SLOT_COUNT; s++) {
+        eeprom_delete_slot(s);
+    }
+}
+
+
 // tulis default ke SEMUA slot EEPROM
 // dipanggil sekali saat factory reset atau EEPROM baru
 void eeprom_write_defaults_all_slots() {

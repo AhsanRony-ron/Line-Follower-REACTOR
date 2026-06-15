@@ -104,8 +104,8 @@ struct __attribute__((packed)) GlobalConfig {
 #define DEFAULT_SPEED1      80
 #define DEFAULT_SPEED2      80
 #define DEFAULT_MAX_PWM     255
-#define DEFAULT_KP          5
-#define DEFAULT_KD          100
+#define DEFAULT_KP          4
+#define DEFAULT_KD          30
 #define DEFAULT_TIMER       10      
 #define DEFAULT_DELAY_MS    100
 #define DEFAULT_MOTOR_L     60

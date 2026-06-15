@@ -154,7 +154,7 @@ void eksekusi_belok(int16_t actual_l, int16_t actual_r, uint16_t delay_ms, int16
         if (use_left) encoderKiriReset();
         else          encoderKananReset();
 
-        int32_t start = use_left ? abs(encoderKiriRead()) : abs(encoderKananRead());
+        int32_t start = 0;
         while (true) {
             set_motors(actual_l, actual_r, DEFAULT_MAX_PWM);
             int32_t now = use_left ? abs(encoderKiriRead()) : abs(encoderKananRead());
@@ -322,7 +322,7 @@ bool eksekusi_decision(CounterParam& p, bool is_mirrored, unsigned long elapsed_
                         calc_pid(p.kp, g_config.kd);
                         g_LOUT = constrain((int)p.speed2 + g_out_p + g_out_d, -255, 255);
                         g_ROUT = constrain((int)p.speed2 - g_out_p - g_out_d, -255, 255);
-                        set_motors(g_LOUT, g_ROUT, DEFAULT_MAX_PWM);
+                        set_motors(g_LOUT, g_ROUT, DEFAULT_MAX_PWM, true);
                     }
                 }
             }
@@ -527,15 +527,23 @@ bool mode_counter(uint8_t cp_start) {
             //                                     lalu tunggu sensor match
             // ─────────────────────────────────────────
 
-            // Kasus 1: DEC_FREE dengan trigger yang tidak butuh sensor
-            // Langsung beraksi tanpa tunggu apapun
-            if (cur.decision == DEC_FREE) {
-                beraksi = true;
+
+            if (nxt.decision == DEC_FREE) {
+                if (nxt.trigger == TRIGGER_TIMER || nxt.trigger == TRIGGER_TICK) {
+                    beraksi = true;
+                } else if (!seeking) {
+                    // TRIGGER_SENSOR / TRIGGER_BLANK — tunggu sensor match seperti Kasus 3,
+                    // tanpa menunggu timer cur habis
+                    sensor_akumulasi |= g_sensor_out;
+                    if (trigger_matched(nxt.trigger, sensor_akumulasi, g_sensor_out, is_mirrored)) {
+                        beraksi = true;
+                    }
+                }
 
             // Kasus 2: TRIGGER_TICK — durasi trigger pakai encoder
             // tick_start diinit sekali saat pertama masuk kondisi ini
             // target > 0 → cek encoder; target == 0 → fallback waktu cur
-            } else if (nxt.trigger == TRIGGER_TICK) {
+            } else if (!seeking && nxt.trigger == TRIGGER_TICK) {
                 bool nxt_use_left = (is_mirrored ? nxt.Encd_r : nxt.Encd_l) > 0;
                 if (!tick_init) {
                     tick_start = nxt_use_left ? encoderKiriRead() : encoderKananRead();
