@@ -151,14 +151,13 @@ void eksekusi_belok(int16_t actual_l, int16_t actual_r, uint16_t delay_ms, int16
         bool use_left = (abs(actual_l) >= abs(actual_r));
 
         // reset encoder sebelum mulai — hindari nilai lama
-        if (use_left) encoderKiriReset();
-        else          encoderKananReset();
-
-        int32_t start = 0;
+        int32_t start;
+        if (use_left) { encoderKiriReset();  start = encoderKiriRead();  }
+        else          { encoderKananReset(); start = encoderKananRead(); }
         while (true) {
-            set_motors(actual_l, actual_r, DEFAULT_MAX_PWM);
             int32_t now = use_left ? abs(encoderKiriRead()) : abs(encoderKananRead());
             if ((now - start) >= encd_b) break;
+            set_motors(actual_l, actual_r, DEFAULT_MAX_PWM);
         }
     } else {
         set_motors(actual_l, actual_r, DEFAULT_MAX_PWM);
@@ -188,9 +187,9 @@ void eksekusi_delay_b(int16_t belok_l, int16_t belok_r,
     if (encd_b > 0) {
         // encoder mode — outer wheel (abs)
         bool use_left = (abs(actual_l) >= abs(actual_r));
-        if (use_left) encoderKiriReset();
-        else          encoderKananReset();
-        int32_t start = 0;
+        int32_t start;
+        if (use_left) { encoderKiriReset();  start = encoderKiriRead();  }
+        else          { encoderKananReset(); start = encoderKananRead(); }
         while (true) {
             int32_t now = use_left ? abs(encoderKiriRead()) : abs(encoderKananRead());
             if ((now - start) >= encd_b) break;

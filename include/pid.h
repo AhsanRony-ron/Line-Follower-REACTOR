@@ -24,7 +24,7 @@ void calc_pid(uint8_t kp, uint8_t kd) {
     static unsigned long lastTime = 0;
     unsigned long now = millis();
     float dt = (now - lastTime) / 1000.0f;
-    if (dt <= 0.0f || dt > 0.1f) dt = 0.01f;  // guard: max 100ms, default 10ms
+    if (dt <= 0.0f || dt > 0.1f) dt = 0.01f;
     lastTime = now;
 
     g_out_p      = g_error * (int)kp;
@@ -56,7 +56,7 @@ void mode_normal(uint8_t kecepatan, uint8_t maxpwm, uint8_t kp, uint8_t kd, Line
 
     calc_pid(kp, kd);
 
-    g_LOUT = constrain((int)kecepatan + g_out_p + g_out_d, -255, 255);
-    g_ROUT = constrain((int)kecepatan - g_out_p - g_out_d, -255, 255);
+    g_LOUT = constrain((int)kecepatan + g_out_p + g_out_d, -120, 255);
+    g_ROUT = constrain((int)kecepatan - g_out_p - g_out_d, -120, 255);
     set_motors(g_LOUT, g_ROUT, maxpwm);
 }

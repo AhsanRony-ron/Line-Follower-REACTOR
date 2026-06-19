@@ -356,3 +356,30 @@ void eeprom_init() {
         g_config.mem_slot = active;
     }
 }
+
+void eeprom_backup() {
+    if (!Serial3.available()) return;
+
+    char cmd = (char)Serial3.read();
+
+    if (cmd == 'P') {
+        Serial3.println("OK");
+
+    } else if (cmd == 'R') {
+        const uint16_t EEPROM_SIZE = 32768;
+
+        // Kirim size (2 byte big-endian)
+        Serial3.write((uint8_t)((EEPROM_SIZE >> 8) & 0xFF));
+        Serial3.write((uint8_t)((EEPROM_SIZE >> 0) & 0xFF));
+
+        // Baca byte-by-byte pakai eeprom_read_byte (sama seperti eeprom_read_block)
+        for (uint16_t addr = 0; addr < EEPROM_SIZE; addr++) {
+            Serial3.write(eeprom_read_byte(addr));
+        }
+
+        // End marker
+        Serial3.write((uint8_t)0xDE);
+        Serial3.write((uint8_t)0xAD);
+        Serial3.flush();
+    }
+}

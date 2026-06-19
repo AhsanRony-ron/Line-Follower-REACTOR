@@ -95,7 +95,11 @@ int32_t encoderKananRead() {
     return val;
 }
 
-void encoderKiriReset()  { countKiri  = 0; }
+void encoderKiriReset() {
+    noInterrupts();
+    countKiri = 0;
+    interrupts();
+}
 void encoderKananReset() { countKanan = 0; }
 
 // ─────────────────────────────────────────

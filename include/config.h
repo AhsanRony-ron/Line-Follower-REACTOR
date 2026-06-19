@@ -73,6 +73,8 @@
 #define EEPROM_DEVICE_ADDR  0x50
 #define EEPROM_SLOT_COUNT   14
 
+HardwareSerial Serial3(PB11, PB10);  // (RX, TX)
+
 // ─────────────────────────────────────────
 //  MULTIPLEXER LOOKUP TABLE
 // ─────────────────────────────────────────

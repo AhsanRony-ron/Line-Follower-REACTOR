@@ -70,6 +70,7 @@ void timer_isr() {
 void setup() {
     display_init();
     display_msg("Loading...");
+    Serial3.begin(115200);
     hardware_init();
     Wire.setClock(400000);
     eeprom_init();
@@ -82,7 +83,7 @@ void setup() {
 void loop() {
     // layar standby — pilih CP, tunggu start atau masuk menu
     uint8_t cp_sel = screen_standby();
-
+    eeprom_backup();
     // jalankan robot sesuai mode
     if (g_config.mode == MODE_NORMAL) {
         // mode normal: following PID biasa sampai tombol ditekan

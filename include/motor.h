@@ -13,7 +13,7 @@
 
 inline int compensate_pwm(int pwm_raw) {
     if (g_volt_filtered < 0.5f) return pwm_raw;
-    float scale = constrain(11.8f / g_volt_filtered, 0.7f, 1.3f);
+    float scale = constrain(11.1f / g_volt_filtered, 0.85f, 1.3f);
     return constrain((int)(pwm_raw * scale), -255, 255);
 }
 

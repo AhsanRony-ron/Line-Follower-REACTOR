@@ -212,9 +212,9 @@ uint8_t screen_standby() {
 // ─────────────────────────────────────────
 //  KALIBRASI SENSOR
 // ─────────────────────────────────────────
-#define SENSOR_OFFSET_PCT 50  // naikkan untuk redam noise, turunkan untuk sensitifitas
 
 void run_kalibrasi() {
+    uint8_t SENSOR_OFFSET_PCT = 50;
     uint8_t high[SENSOR_COUNT] = {0};
     uint8_t low[SENSOR_COUNT];
     uint8_t low_offset[SENSOR_COUNT] = {0};  // ← tambah array ini
@@ -222,6 +222,18 @@ void run_kalibrasi() {
 
     while (true) {
         for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
+            if (btn_next()) {
+                SENSOR_OFFSET_PCT += 5;
+                if (SENSOR_OFFSET_PCT > 100) SENSOR_OFFSET_PCT = 100;
+            }
+            if (btn_back()) {
+                if (SENSOR_OFFSET_PCT >= 5) SENSOR_OFFSET_PCT -= 5;
+            }
+            if (btn_x()) {
+                memset(low,  255, sizeof(low));   // reset low ke max
+                memset(high,   0, sizeof(high));  // reset high ke 0 juga
+                memset(low_offset, 0, sizeof(low_offset));
+            }
             uint8_t val = read_adc(i);
             g_sensor_raw[i] = val;
             if (val > high[i]) high[i] = val;
