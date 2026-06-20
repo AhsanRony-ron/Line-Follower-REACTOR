@@ -415,11 +415,11 @@ bool mode_counter(uint8_t cp_start) {
     // ─────────────────────────────────────────
     g_flag_cond = 0;
     reset_timer();
+    decode_zone(0);
     while (read_timer() < start_timer) {
         led_lcd(false);
         led_timer((read_timer() / 5) % 2 == 1);
         following(g_config.speed_mode, g_config.kp);
-        decode_zone(0);
     }
 
     // Reset timer agar counter pertama mulai dari 0
@@ -640,7 +640,7 @@ bool mode_counter(uint8_t cp_start) {
         // ─────────────────────────────────────────
         clear_pid();
         reset_timer();
-        decode_zone(g_counter[cidx].Line_C);
+        decode_zone(g_counter[cidx + 1].Line_C);
         led_lcd(false);
         led_timer(false);
 

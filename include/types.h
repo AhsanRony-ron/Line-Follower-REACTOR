@@ -11,8 +11,8 @@ typedef uint8_t RobotMode;
 
 typedef uint8_t LineColor;
 #define LINE_AUTO     ((LineColor)0)
-#define LINE_HITAM    ((LineColor)4)
-#define LINE_PUTIH    ((LineColor)8)
+#define LINE_HITAM    ((LineColor)1)
+#define LINE_PUTIH    ((LineColor)2)
 
 typedef uint8_t Decision;
 #define DEC_LOST        ((Decision)0)

@@ -101,18 +101,20 @@ uint16_t get_neighbor(uint16_t bitmask) {
 // ─────────────────────────────────────────
 
 inline void decode_zone(uint8_t zone_raw) {
-    if (zone_raw == 0) {
-        g_mode_flag  = 1;
-        g_line_param = 0;
-    } else if (zone_raw <= 4) {
-        g_mode_flag  = zone_raw;
-        g_line_param = 0;
-    } else if (zone_raw <= 8) {
-        g_mode_flag  = zone_raw - 4;
-        g_line_param = 1;
-    } else {
-        g_mode_flag  = zone_raw - 8;
-        g_line_param = 2;
+    switch (zone_raw) {
+        case AUTO_NORMAL:  g_mode_flag=1; g_line_param=0; break;
+        case AUTO_CENTER:  g_mode_flag=2; g_line_param=0; break;
+        case AUTO_LEFT:    g_mode_flag=3; g_line_param=0; break;
+        case AUTO_RIGHT:   g_mode_flag=4; g_line_param=0; break;
+        case BLACK_NORMAL: g_mode_flag=1; g_line_param=1; break;
+        case BLACK_CENTER: g_mode_flag=2; g_line_param=1; break;
+        case BLACK_LEFT:   g_mode_flag=3; g_line_param=1; break;
+        case BLACK_RIGHT:  g_mode_flag=4; g_line_param=1; break;
+        case WHITE_NORMAL: g_mode_flag=1; g_line_param=2; break;
+        case WHITE_CENTER: g_mode_flag=2; g_line_param=2; break;
+        case WHITE_LEFT:   g_mode_flag=3; g_line_param=2; break;
+        case WHITE_RIGHT:  g_mode_flag=4; g_line_param=2; break;
+        default:           g_mode_flag=1; g_line_param=0; break;
     }
 }
 

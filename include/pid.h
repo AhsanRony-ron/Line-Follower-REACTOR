@@ -49,7 +49,15 @@ void clear_pid() {
 //  MODE NORMAL — FOLLOWING
 // ─────────────────────────────────────────
 void mode_normal(uint8_t kecepatan, uint8_t maxpwm, uint8_t kp, uint8_t kd, LineColor line) {
-    decode_zone(line);
+    
+    if (line == LINE_PUTIH) {
+        g_line_param = 2;  // invert
+    } else if (line == LINE_HITAM) {
+        g_line_param = 1;  // normal
+    } else {
+        g_line_param = 0;  // auto
+    }
+    g_mode_flag = 1;  // selalu thin untuk mode normal
     scan_sensor();
     if (g_sensor_out != 0) g_pv_out = input_error(g_sensor_out);
     g_error = -g_pv_out;
