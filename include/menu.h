@@ -887,6 +887,158 @@ void menu1() {
     }
 }
 
+void do_shift_counter(uint8_t counter_from, int8_t shift_val) {
+    if (shift_val == 0) return;
+ 
+    if (shift_val > 0) {
+        // Geser ke atas: copy dari belakang ke depan
+        for (int16_t i = COUNTER_MAX - 1; i >= (int16_t)counter_from; i--) {
+            int16_t dst = i + shift_val;
+            if (dst < COUNTER_MAX) {
+                g_counter[dst] = g_counter[i];
+            }
+        }
+        // Isi slot yang ditinggalkan dengan default
+        for (uint8_t i = counter_from; i < counter_from + shift_val && i < COUNTER_MAX; i++) {
+            g_counter[i].timer      = DEFAULT_TIMER;
+            g_counter[i].speed1     = DEFAULT_SPEED1;
+            g_counter[i].speed2     = DEFAULT_SPEED2;
+            g_counter[i].kp         = DEFAULT_KP;
+            g_counter[i].trigger    = DEFAULT_TRIGGER;
+            g_counter[i].decision   = DEFAULT_DECISION;
+            g_counter[i].delay_type = DEFAULT_DELAY_TYPE;
+            g_counter[i].delay_ms   = DEFAULT_DELAY_MS;
+            g_counter[i].motor_l    = DEFAULT_MOTOR_L;
+            g_counter[i].motor_r    = DEFAULT_MOTOR_R;
+            g_counter[i].Encd_l     = 0;
+            g_counter[i].Encd_r     = 0;
+            g_counter[i].Encd_b     = 0;
+            g_counter[i].Line_C     = DEFAULT_LINE_COUNTER;
+        }
+    } else {
+        // Geser ke bawah: copy dari depan ke belakang
+        int8_t abs_shift = -shift_val;
+        for (int16_t i = counter_from; i < COUNTER_MAX; i++) {
+            int16_t dst = i - abs_shift;
+            if (dst >= 0) {
+                g_counter[dst] = g_counter[i];
+            }
+        }
+        // Isi sisa akhir dengan default
+        for (int16_t i = COUNTER_MAX - abs_shift; i < COUNTER_MAX; i++) {
+            if (i >= 0) {
+                g_counter[i].timer      = DEFAULT_TIMER;
+                g_counter[i].speed1     = DEFAULT_SPEED1;
+                g_counter[i].speed2     = DEFAULT_SPEED2;
+                g_counter[i].kp         = DEFAULT_KP;
+                g_counter[i].trigger    = DEFAULT_TRIGGER;
+                g_counter[i].decision   = DEFAULT_DECISION;
+                g_counter[i].delay_type = DEFAULT_DELAY_TYPE;
+                g_counter[i].delay_ms   = DEFAULT_DELAY_MS;
+                g_counter[i].motor_l    = DEFAULT_MOTOR_L;
+                g_counter[i].motor_r    = DEFAULT_MOTOR_R;
+                g_counter[i].Encd_l     = 0;
+                g_counter[i].Encd_r     = 0;
+                g_counter[i].Encd_b     = 0;
+                g_counter[i].Line_C     = DEFAULT_LINE_COUNTER;
+            }
+        }
+    }
+ 
+    // Update checkpoint: counter_pos >= counter_from ikut digeser
+    for (uint8_t i = 0; i < CP_MAX; i++) {
+        if (g_checkpoint[i].counter_pos == 0xFF) continue;
+        if (g_checkpoint[i].counter_pos < counter_from) continue;
+        int16_t new_pos = (int16_t)g_checkpoint[i].counter_pos + shift_val;
+        if (new_pos < 0)            new_pos = 0;
+        if (new_pos >= COUNTER_MAX) new_pos = COUNTER_MAX - 1;
+        g_checkpoint[i].counter_pos = (uint8_t)new_pos;
+    }
+}
+
+void menu_shift_counter() {
+    uint8_t highlight    = 0;   // 0 = field Counter, 1 = field Shift
+    uint8_t counter_from = 0;
+    int8_t  shift_val    = 0;
+ 
+    wait_release();
+ 
+    while (true) {
+        // hitung actual shift dengan clamp
+        int16_t target      = (int16_t)counter_from + shift_val;
+        if (target < 0)            target = 0;
+        if (target >= COUNTER_MAX) target = COUNTER_MAX - 1;
+        int8_t actual_shift = (int8_t)(target - counter_from);
+ 
+        display_shift_counter_edit(highlight, counter_from, shift_val);
+ 
+        // ── UP/DOWN: pindah highlight ──
+        if (btn_up())   highlight = 0;
+        if (btn_down()) highlight = 1;
+ 
+        // ── NEXT/BACK: ubah nilai field aktif ──
+        if (highlight == 0) {
+            if (btn_next()) {
+                if (counter_from < COUNTER_MAX - 1) counter_from++;
+                // re-clamp shift agar target tetap valid
+                int16_t t = (int16_t)counter_from + shift_val;
+                if (t < 0)            shift_val = -(int8_t)counter_from;
+                if (t >= COUNTER_MAX) shift_val = (int8_t)(COUNTER_MAX - 1 - counter_from);
+            }
+            if (btn_back()) {
+                if (counter_from > 0) counter_from--;
+                int16_t t = (int16_t)counter_from + shift_val;
+                if (t < 0)            shift_val = -(int8_t)counter_from;
+                if (t >= COUNTER_MAX) shift_val = (int8_t)(COUNTER_MAX - 1 - counter_from);
+            }
+        } else {
+            if (btn_next()) {
+                if ((int16_t)counter_from + shift_val + 1 < COUNTER_MAX) shift_val++;
+            }
+            if (btn_back()) {
+                if ((int16_t)counter_from + shift_val - 1 >= 0) shift_val--;
+            }
+        }
+ 
+        // ── X: reset field yang di-highlight ──
+        if (btn_x()) {
+            if (highlight == 0) counter_from = 0;
+            else                shift_val    = 0;
+        }
+ 
+        // ── SAVE: masuk confirm screen ──
+        if (btn_save()) {
+            if (actual_shift == 0) {
+                display_msg("Shift = 0", "Tidak ada perubahan");
+                delay(1000);
+                // kembali ke edit screen (loop lanjut)
+                continue;
+            }
+ 
+            // Tampilkan confirm screen, tunggu SAVE atau X
+            wait_release();
+            while (true) {
+                display_shift_counter_confirm(counter_from, actual_shift);
+                if (btn_save()) {
+                    // Eksekusi
+                    display_msg("Shifting...", "Please wait");
+                    do_shift_counter(counter_from, actual_shift);
+                    eeprom_save_counter(g_config.mem_slot);
+                    eeprom_save_cp(g_config.mem_slot);
+                    display_msg("Shift Done!");
+                    delay(800);
+                    return;  // keluar menu
+                }
+                if (btn_x()) {
+                    // Batal → kembali ke edit screen
+                    wait_release();
+                    break;
+                }
+            }
+        }
+    }
+}
+
 // ─────────────────────────────────────────
 //  MENU 2 — PILIHAN UTAMA
 // ─────────────────────────────────────────
@@ -907,8 +1059,9 @@ void menu2() {
             switch (highlight) {
                 case 0: menu_counter();   break;
                 case 1: menu_checkpoint(); break;
-                case 2: menu_copy_mem();  break;
-                case 3:
+                case 2: menu_shift_counter();  break;
+                case 3: menu_copy_mem();  break;
+                case 4:
                     if (confirm("Delete slot?")) {
                         display_msg("Deleting...", "Please wait");
                         eeprom_delete_slot(g_config.mem_slot);
@@ -918,7 +1071,7 @@ void menu2() {
                         delay(1000);
                     }
                     break;
-                case 4:
+                case 5:
                     if (confirm("Reset ALL?")) {
                         display_msg("Resetting...", "Please wait");
                         eeprom_write_defaults_all_slots();
@@ -933,3 +1086,4 @@ void menu2() {
         if (btn_save()) return;
     }
 }
+

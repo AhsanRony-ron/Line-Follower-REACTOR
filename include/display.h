@@ -354,14 +354,14 @@ void display_menu1(uint8_t scroll, uint8_t highlight, GlobalConfig& cfg, uint8_t
 // ─────────────────────────────────────────
 
 static const char* MENU2_LABELS[] = {
-    "Counter", "Check Point", "Copy Mem", "Delete", "Reset"
+    "Counter", "Check Point", "Shift Counter", "Copy Mem", "Delete", "Reset"
 };
-#define MENU2_COUNT 5
+#define MENU2_COUNT 6
 
 void display_menu2(uint8_t scroll, uint8_t highlight) {
     u8g2.clearBuffer();
 
-    for (uint8_t i = 0; i < 6; i++) {
+    for (uint8_t i = 0; i < 7; i++) {
         uint8_t idx = scroll + i;
         if (idx >= MENU2_COUNT) break;
 
@@ -698,5 +698,100 @@ void display_msg(const char* line1, const char* line2 = nullptr) {
     u8g2.clearBuffer();
     disp_text(0, 1, line1);
     if (line2) disp_text(0, 2, line2);
+    u8g2.sendBuffer();
+}
+
+void display_shift_counter_edit(uint8_t highlight, uint8_t counter_from, int8_t shift_val) {
+    // hitung target dengan clamp
+    int16_t target       = (int16_t)counter_from + shift_val;
+    if (target < 0)            target = 0;
+    if (target >= COUNTER_MAX) target = COUNTER_MAX - 1;
+    int8_t actual_shift  = (int8_t)(target - counter_from);
+ 
+    u8g2.clearBuffer();
+ 
+    // Baris 0: judul
+    disp_text(0, 0, "Shift Counter");
+ 
+    // Baris 1: [C:XXX] -> C:YYY
+    u8g2.setCursor(0, ROW(1));
+    if (highlight == 0) u8g2.print("["); else u8g2.print(" ");
+    u8g2.print("C:");
+    if (counter_from < 10)  u8g2.print("0");
+    if (counter_from < 100) u8g2.print("0");
+    u8g2.print(counter_from);
+    if (highlight == 0) u8g2.print("]"); else u8g2.print(" ");
+    u8g2.print("->C:");
+    if (target < 10)  u8g2.print("0");
+    if (target < 100) u8g2.print("0");
+    u8g2.print((uint8_t)target);
+ 
+    // Baris 2: [Shift:+XX]
+    u8g2.setCursor(0, ROW(2));
+    if (highlight == 1) u8g2.print("["); else u8g2.print(" ");
+    u8g2.print("Shift:");
+    if (actual_shift >= 0) u8g2.print('+');
+    u8g2.print(actual_shift);
+    if (highlight == 1) u8g2.print("]"); else u8g2.print(" ");
+ 
+    // Baris 3: info ringkas
+    char buf[22];
+    if (actual_shift > 0) {
+        uint8_t lost_from = COUNTER_MAX - actual_shift;
+        snprintf(buf, sizeof(buf), "default:C%02d-%02d", counter_from,
+                 (uint8_t)(counter_from + actual_shift - 1));
+        disp_text(0, 3, buf);
+        snprintf(buf, sizeof(buf), "removed:C%02d-%02d", lost_from, COUNTER_MAX - 1);
+        disp_text(0, 4, buf);
+    } else if (actual_shift < 0) {
+        int8_t abs_s = -actual_shift;
+        snprintf(buf, sizeof(buf), "replace:C%02d-%02d",
+                 (uint8_t)target, counter_from - 1);
+        disp_text(0, 3, buf);
+        snprintf(buf, sizeof(buf), "default:C%02d-%02d",
+                 COUNTER_MAX - abs_s, COUNTER_MAX - 1);
+        disp_text(0, 4, buf);
+    } else {
+        disp_text(0, 3, "Shift=0, no change");
+        disp_text(0, 4, "");
+    }
+
+    u8g2.sendBuffer();
+}
+
+void display_shift_counter_confirm(uint8_t counter_from, int8_t actual_shift) {
+    int16_t target = (int16_t)counter_from + actual_shift;
+    char buf[22];
+ 
+    u8g2.clearBuffer();
+ 
+    disp_text(0, 0, "Konfirmasi Shift:");
+ 
+    snprintf(buf, sizeof(buf), "C%02d->C%02d (sh:%+d)",
+             counter_from, (uint8_t)target, actual_shift);
+    disp_text(0, 1, buf);
+ 
+    if (actual_shift > 0) {
+        snprintf(buf, sizeof(buf), "default:C%02d-%02d",
+                 counter_from, (uint8_t)(counter_from + actual_shift - 1));
+        disp_text(0, 2, buf);
+        snprintf(buf, sizeof(buf), "removed:C%02d-%02d",
+                 (uint8_t)(COUNTER_MAX - actual_shift), COUNTER_MAX - 1);
+        disp_text(0, 3, buf);
+    } else {
+        int8_t abs_s = -actual_shift;
+        snprintf(buf, sizeof(buf), "replace:C%02d-%02d",
+                 (uint8_t)target, counter_from - 1);
+        disp_text(0, 2, buf);
+        snprintf(buf, sizeof(buf), "default:C%02d-%02d",
+                 (uint8_t)(COUNTER_MAX - abs_s), COUNTER_MAX - 1);
+        disp_text(0, 3, buf);
+    }
+ 
+    // CP update info
+    disp_text(0, 4, "CP: auto update");
+ 
+    disp_text(0, 5, "SAV:ok  X:batal");
+ 
     u8g2.sendBuffer();
 }
