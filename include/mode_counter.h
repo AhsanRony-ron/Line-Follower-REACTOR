@@ -269,32 +269,8 @@ bool eksekusi_decision(CounterParam& p, bool is_mirrored, unsigned long elapsed_
         }
 
         case DEC_FREE: {
-            int16_t fl = is_mirrored ? (int16_t)p.motor_r : (int16_t)p.motor_l;
-            int16_t fr = is_mirrored ? (int16_t)p.motor_l : (int16_t)p.motor_r;
-            int16_t target = resolve_encd(fl, fr, p.Encd_l, p.Encd_r, is_mirrored);
-
-            if (p.trigger == TRIGGER_TICK || target > 0) {
-                bool use_left = is_mirrored ? (p.Encd_r > 0 ? false : true)
-                            : (p.Encd_l > 0);
-
-                int32_t start = use_left ? encoderKiriRead() : encoderKananRead();
-
-                while (true) {
-                    int32_t now = use_left ? encoderKiriRead() : encoderKananRead();
-                    if (abs(now - start) >= target) break;
-
-                    led_lcd(false);
-                    led_timer((read_timer() / 5) % 2 == 1);
-                    set_motors(fl, fr, DEFAULT_MAX_PWM);
-                }
-            } else {
-                int free_start = read_timer();
-                while ((read_timer() - free_start) < (int)p.timer) {
-                    led_lcd(false);
-                    led_timer((read_timer() / 5) % 2 == 1);
-                    set_motors(fl, fr, DEFAULT_MAX_PWM);
-                }
-            }
+            // DEC_FREE kini sepenuhnya dieksekusi di main loop agar tidak double-timer
+            // dan tidak terjebak blokir. Cukup bersihkan state saja.
             clear_pid();
             g_flag_cond = 0;
             break;
@@ -312,7 +288,7 @@ bool eksekusi_decision(CounterParam& p, bool is_mirrored, unsigned long elapsed_
 
                     while (true) {
                         int32_t now = use_left ? encoderKiriRead() : encoderKananRead();
-                        if ((now - start) >= target) break;
+                        if (abs(now - start) >= target) break;
                         led_lcd(true);
                         led_timer((read_timer() / 5) % 2 == 1);
                         scan_sensor();
@@ -468,7 +444,8 @@ bool mode_counter(uint8_t cp_start) {
             // prioritas: Encd_l dulu, kalau 0 pakai Encd_r
             // mirror: swap sisi
 
-            int32_t enc_now = (cur_use_left ? encoderKiriRead() : encoderKananRead()) - enc_counter_start;
+            // Gunakan abs() agar pergerakan mundur (misal di DEC_FREE) tetap tercatat
+            int32_t enc_now = abs((cur_use_left ? encoderKiriRead() : encoderKananRead()) - enc_counter_start);
 
             // ── LED STATUS ──
             bool waktu_habis_led = (cur_tick_target > 0)
@@ -499,20 +476,28 @@ bool mode_counter(uint8_t cp_start) {
             bool seeking = (g_flag_cond != 0);
             bool found   = cek_flag_cond(is_mirrored);
 
-            g_error = -g_pv_out;
-            calc_pid(cur.kp, g_config.kd);
-
-            // ── SET MOTOR ──
-            // Kalau masih seeking (robot putar cari garis setelah belok) →
-            //   set motor pivot sesuai arah seek
-            // Kalau normal/sudah nemu garis →
-            //   set motor PID following
-            if (seeking && !found) {
-                set_motor_seek(cur.motor_l, cur.motor_r);
+            if (cur.decision == DEC_FREE) {
+                // BYPASS PID: Mode DEC_FREE murni tidak mempedulikan garis.
+                // Robot bergerak sepenuhnya blind open-loop.
+                int16_t fl = is_mirrored ? (int16_t)cur.motor_r : (int16_t)cur.motor_l;
+                int16_t fr = is_mirrored ? (int16_t)cur.motor_l : (int16_t)cur.motor_r;
+                set_motors(fl, fr, DEFAULT_MAX_PWM);
             } else {
-                g_LOUT = constrain((int)spd + g_out_p + g_out_d, -255, 255);
-                g_ROUT = constrain((int)spd - g_out_p - g_out_d, -255, 255);
-                set_motors(g_LOUT, g_ROUT, DEFAULT_MAX_PWM);
+                g_error = -g_pv_out;
+                calc_pid(cur.kp, g_config.kd);
+
+                // ── SET MOTOR ──
+                // Kalau masih seeking (robot putar cari garis setelah belok) →
+                //   set motor pivot sesuai arah seek
+                // Kalau normal/sudah nemu garis →
+                //   set motor PID following
+                if (seeking && !found) {
+                    set_motor_seek(cur.motor_l, cur.motor_r);
+                } else {
+                    g_LOUT = constrain((int)spd + g_out_p + g_out_d, -255, 255);
+                    g_ROUT = constrain((int)spd - g_out_p - g_out_d, -255, 255);
+                    set_motors(g_LOUT, g_ROUT, DEFAULT_MAX_PWM);
+                }
             }
 
             // ─────────────────────────────────────────
@@ -549,7 +534,7 @@ bool mode_counter(uint8_t cp_start) {
                     tick_init  = true;
                 }
                 int32_t tick_now   = nxt_use_left ? encoderKiriRead() : encoderKananRead();
-                int32_t tick_delta = tick_now - tick_start;
+                int32_t tick_delta = abs(tick_now - tick_start); // pastikan abs() agar bisa mundur
 
                 int16_t target = resolve_encd_cur(nxt.Encd_l, nxt.Encd_r);  // ambil nilai yang ada
 
