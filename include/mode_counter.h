@@ -20,6 +20,7 @@ extern int              g_LOUT;
 extern int              g_ROUT;
 extern int              g_error;
 extern int              g_last_error;
+extern uint8_t g_resume_cp;  // deklarasi extern, definisi di main.cpp
 
 // ─────────────────────────────────────────
 //  FLAG COND — adopt dari panzer
@@ -127,7 +128,7 @@ bool cek_flag_cond(bool is_mirrored) {
         return true;
     }
 
-    return false;
+    return 0;
 }
 
 // ─────────────────────────────────────────
@@ -375,13 +376,13 @@ bool eksekusi_decision(CounterParam& p, bool is_mirrored, unsigned long elapsed_
             break;
     }
 
-    return false;
+    return 0;
 }
 
 // ─────────────────────────────────────────
 //  MODE COUNTER — MAIN LOOP
 // ─────────────────────────────────────────
-bool mode_counter(uint8_t cp_start) {
+uint8_t mode_counter(uint8_t cp_start) {
     u8g2.clearBuffer();
     u8g2.sendBuffer();
 
@@ -436,6 +437,15 @@ bool mode_counter(uint8_t cp_start) {
     // ─────────────────────────────────────────
     for (uint8_t cidx = start_counter; cidx < COUNTER_MAX - 1; cidx++) {
         g_counter_idx = cidx;
+
+        // ── CEK CP ──
+        for (uint8_t cp_i = 0; cp_i < CP_MAX; cp_i++) {
+            if (g_checkpoint[cp_i].counter_pos != 0xFF &&
+                g_checkpoint[cp_i].counter_pos == cidx) {
+                g_last_cp = cp_i + 1;  // 1-based, sama dengan cp_sel di standby
+            }
+        }
+
         CounterParam& cur = g_counter[cidx];
         CounterParam& nxt = g_counter[cidx + 1];
 
@@ -462,6 +472,11 @@ bool mode_counter(uint8_t cp_start) {
         //  LOOP UTAMA — jalan terus sampai trigger nxt matched
         // ─────────────────────────────────────────
         while (!beraksi) {
+            if (sw_save() || sw_x()) {
+                motor_stop();
+                return g_last_cp;
+            }
+
             int t = read_timer();
 
             // tentukan encoder sisi mana yang dipakai untuk cur
@@ -605,7 +620,7 @@ bool mode_counter(uint8_t cp_start) {
         //  STOP             → following lalu berhenti & finish
         //  Return true kalau DEC_STOP (mode selesai)
         // ─────────────────────────────────────────
-        if (eksekusi_decision(nxt, is_mirrored, elapsed_start)) return true;
+        if (eksekusi_decision(nxt, is_mirrored, elapsed_start)) return 0;
 
         // ─────────────────────────────────────────
         //  TUNGGU SEEKING SELESAI
@@ -615,6 +630,11 @@ bool mode_counter(uint8_t cp_start) {
         //  lalu motor langsung PID normal dengan speed nxt.speed2
         // ─────────────────────────────────────────
         while (g_flag_cond != 0) {
+            if (sw_save() || sw_x()) {
+                motor_stop();
+                g_flag_cond = 0;
+                return g_last_cp;
+            }
             scan_sensor();
             if (g_sensor_out != 0) g_pv_out = input_error(g_sensor_out, is_mirrored);
 

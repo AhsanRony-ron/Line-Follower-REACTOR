@@ -27,6 +27,7 @@ PORT        = "COM4"        # ganti sesuai port kamu
 BAUDRATE    = 115200
 TIMEOUT     = 10            # detik
 OUTPUT_FILE = "eeprom_dump.xlsx"
+OUTPUT_BIN  = "eeprom_dump.bin"
 
 # ─── KONSTANTA STRUCT (ikut sizeof() dari C, #pragma pack(1)) ─────────────────
 COUNTER_MAX       = 100
@@ -407,6 +408,15 @@ def build_workbook(raw):
 
     return wb
 
+# ─── SAVE BIN (backup 1:1) ────────────────────────────────────────────────────
+
+def save_bin(raw, filepath):
+    """Simpan raw EEPROM bytes 1:1 sebagai file .bin untuk backup / flash ulang."""
+    with open(filepath, "wb") as f:
+        f.write(raw)
+    print(f"[✓] Backup bin  : {filepath}  ({len(raw)} bytes)")
+
+
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -414,24 +424,103 @@ def main():
     if raw is None:
         return
 
+    # Simpan backup .bin dulu sebelum parse — aman walau parse gagal
+    save_bin(raw, OUTPUT_BIN)
+
     wb = build_workbook(raw)
     if wb is None:
         return
 
     wb.save(OUTPUT_FILE)
-    print(f"[✓] Disimpan ke: {OUTPUT_FILE}")
+    print(f"[✓] Excel       : {OUTPUT_FILE}")
     print(f"    Total sheet : {len(wb.sheetnames)}")
 
 
+# ─── WRITE EEPROM VIA SERIAL ─────────────────────────────────────────────────
+
+def write_eeprom_to_serial(port, baudrate, bin_filepath):
+    with open(bin_filepath, "rb") as f:
+        raw = f.read()
+
+    if len(raw) != 32768:
+        print(f"[!] Ukuran file salah: {len(raw)} bytes, harus 32768")
+        return
+
+    print(f"[*] Membuka port {port} @ {baudrate}...")
+    ser = serial.Serial(port, baudrate, timeout=10)
+    time.sleep(2)
+
+    # Ping
+    ser.write(b'P')
+    resp = ser.readline().decode('utf-8', errors='ignore').strip()
+    if resp != "OK":
+        print(f"[!] Ping gagal: {repr(resp)}")
+        ser.close()
+        return
+
+    # Kirim command Write
+    ser.write(b'W')
+
+    # Tunggu ACK siap dari STM32
+    ack = ser.read(1)
+    if ack != b'K':
+        print(f"[!] ACK salah: {ack}")
+        ser.close()
+        return
+    print(f"[*] STM32 siap, mengirim {len(raw)} bytes...")
+
+    # Kirim data per 64 byte, tunggu ACK 'K' per page dari ESP32
+    chunk_size = 64
+    total_pages = (len(raw) + chunk_size - 1) // chunk_size
+
+    for page_idx, i in enumerate(range(0, len(raw), chunk_size)):
+        chunk = raw[i : i + chunk_size]
+        ser.write(chunk)
+        ser.flush()
+
+        # Tunggu ACK per page — ESP32 kirim 'K' setelah page write selesai
+        ack = ser.read(1)
+        if ack != b'K':
+            print(f"\n[!] ACK page {page_idx} salah: {ack}")
+            ser.close()
+            return
+
+        done = min(i + chunk_size, len(raw))
+        print(f"\r    {done}/{len(raw)} bytes ({100 * done // len(raw)}%)", end="")
+
+    print()
+
+    # Tunggu konfirmasi done dari STM32
+    result = ser.read(1)
+    ser.close()
+
+    if result == b'D':
+        print("[✓] Write selesai!")
+    else:
+        print(f"[!] Respons tidak dikenal: {result}")
+
+
+# ─── ENTRY POINT ──────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
     import sys
+
     if len(sys.argv) > 1 and sys.argv[1].endswith(".bin"):
-        print(f"[*] Mode file: membaca {sys.argv[1]}")
-        with open(sys.argv[1], "rb") as f:
-            raw = f.read()
-        wb = build_workbook(raw)
-        if wb:
-            wb.save(OUTPUT_FILE)
-            print(f"[✓] Disimpan ke: {OUTPUT_FILE}")
+        if "--write" in sys.argv:
+            # Flash .bin ke EEPROM via serial
+            # Usage: python script.py eeprom_dump.bin --write
+            write_eeprom_to_serial(PORT, BAUDRATE, sys.argv[1])
+        else:
+            # Baca .bin → generate Excel saja (tidak overwrite .bin sumber)
+            # Usage: python script.py eeprom_dump.bin
+            print(f"[*] Mode file: membaca {sys.argv[1]}")
+            with open(sys.argv[1], "rb") as f:
+                raw = f.read()
+            wb = build_workbook(raw)
+            if wb:
+                wb.save(OUTPUT_FILE)
+                print(f"[✓] Excel       : {OUTPUT_FILE}")
     else:
+        # Baca dari serial → simpan .bin + .xlsx
+        # Usage: python script.py
         main()

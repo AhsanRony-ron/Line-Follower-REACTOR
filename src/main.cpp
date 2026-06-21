@@ -38,6 +38,8 @@ uint16_t g_sensor_out     = 0;
 uint8_t  g_invers         = 0;  // flag auto-recovery keluar jalur
 uint8_t  g_sensor_state[SENSOR_COUNT] = {0};
 
+uint8_t g_resume_cp = 0;
+
 // PID
 int g_error      = 0;
 int g_last_error = 0;
@@ -107,9 +109,9 @@ void loop() {
         motor_stop();
 
     } else {
-        // mode counter
         encoderKiriReset();
         encoderKananReset();
-        mode_counter(cp_sel);
+        g_resume_cp = mode_counter(cp_sel);
+        motor_stop();
     }
 }

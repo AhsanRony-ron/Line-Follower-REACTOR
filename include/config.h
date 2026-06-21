@@ -92,3 +92,5 @@ volatile int32_t countKanan = 0;
 uint8_t tick_period;  // PID dihitung setiap N tick encoder
 
 bool g_batt_low = false; 
+
+static uint8_t g_last_cp = 0; 

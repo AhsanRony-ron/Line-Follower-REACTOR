@@ -17,6 +17,7 @@ extern uint8_t          g_sensor_thresh[SENSOR_COUNT];
 extern volatile uint16_t g_periodo_isr;  // volatile copy dari g_config.periode untuk ISR
 extern volatile int32_t countKiri;
 extern volatile int32_t countKanan;
+extern uint8_t g_resume_cp;
 
 static int32_t lastEnc_r = 0;
 static int32_t lastEnc_l = 0;
@@ -158,9 +159,10 @@ bool btn_x() {
 //  return: index CP yang dipilih (0 = mulai dari awal)
 // ─────────────────────────────────────────
 uint8_t screen_standby() {
-    uint8_t cp_sel = 0;
+    uint8_t cp_sel = g_resume_cp;  // mulai dari CP terakhir
+    g_resume_cp = 0;   
+    
     unsigned long last_disp = 0;
-
     // flush semua tombol saat masuk standby
     wait_release();
 
