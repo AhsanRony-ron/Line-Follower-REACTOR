@@ -270,8 +270,32 @@ bool eksekusi_decision(CounterParam& p, bool is_mirrored, unsigned long elapsed_
         }
 
         case DEC_FREE: {
-            // DEC_FREE kini sepenuhnya dieksekusi di main loop agar tidak double-timer
-            // dan tidak terjebak blokir. Cukup bersihkan state saja.
+            int16_t fl = is_mirrored ? (int16_t)p.motor_r : (int16_t)p.motor_l;
+            int16_t fr = is_mirrored ? (int16_t)p.motor_l : (int16_t)p.motor_r;
+            int16_t target = resolve_encd(fl, fr, p.Encd_l, p.Encd_r, is_mirrored);
+
+            if (p.trigger == TRIGGER_TICK || target > 0) {
+                bool use_left = is_mirrored ? (p.Encd_r > 0 ? false : true)
+                            : (p.Encd_l > 0);
+
+                int32_t start = use_left ? encoderKiriRead() : encoderKananRead();
+
+                while (true) {
+                    int32_t now = use_left ? encoderKiriRead() : encoderKananRead();
+                    if (abs(now - start) >= target) break;
+
+                    led_lcd(false);
+                    led_timer((read_timer() / 5) % 2 == 1);
+                    set_motors(fl, fr, DEFAULT_MAX_PWM);
+                }
+            } else {
+                int free_start = read_timer();
+                while ((read_timer() - free_start) < (int)p.timer) {
+                    led_lcd(false);
+                    led_timer((read_timer() / 5) % 2 == 1);
+                    set_motors(fl, fr, DEFAULT_MAX_PWM);
+                }
+            }
             clear_pid();
             g_flag_cond = 0;
             break;
@@ -491,13 +515,6 @@ uint8_t mode_counter(uint8_t cp_start) {
             bool seeking = (g_flag_cond != 0);
             bool found   = cek_flag_cond(is_mirrored);
 
-            if (cur.decision == DEC_FREE) {
-                // BYPASS PID: Mode DEC_FREE murni tidak mempedulikan garis.
-                // Robot bergerak sepenuhnya blind open-loop.
-                int16_t fl = is_mirrored ? (int16_t)cur.motor_r : (int16_t)cur.motor_l;
-                int16_t fr = is_mirrored ? (int16_t)cur.motor_l : (int16_t)cur.motor_r;
-                set_motors(fl, fr, DEFAULT_MAX_PWM);
-            } else {
                 g_error = -g_pv_out;
                 calc_pid(cur.kp, g_config.kd);
 
@@ -512,7 +529,6 @@ uint8_t mode_counter(uint8_t cp_start) {
                     g_LOUT = constrain((int)spd + g_out_p + g_out_d, -255, 255);
                     g_ROUT = constrain((int)spd - g_out_p - g_out_d, -255, 255);
                     set_motors(g_LOUT, g_ROUT, DEFAULT_MAX_PWM);
-                }
             }
 
             // ─────────────────────────────────────────
