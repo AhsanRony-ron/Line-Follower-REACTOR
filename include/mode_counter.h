@@ -514,20 +514,20 @@ uint8_t mode_counter(uint8_t cp_start) {
             bool seeking = (g_flag_cond != 0);
             bool found   = cek_flag_cond(is_mirrored);
 
-                g_error = -g_pv_out;
-                calc_pid(cur.kp, g_config.kd);
+            g_error = -g_pv_out;
+            calc_pid(cur.kp, g_config.kd);
 
-                // ── SET MOTOR ──
-                // Kalau masih seeking (robot putar cari garis setelah belok) →
-                //   set motor pivot sesuai arah seek
-                // Kalau normal/sudah nemu garis →
-                //   set motor PID following
-                if (seeking && !found) {
-                    set_motor_seek(cur.motor_l, cur.motor_r);
-                } else {
-                    g_LOUT = constrain((int)spd + g_out_p + g_out_d, -255, 255);
-                    g_ROUT = constrain((int)spd - g_out_p - g_out_d, -255, 255);
-                    set_motors(g_LOUT, g_ROUT, DEFAULT_MAX_PWM);
+            // ── SET MOTOR ──
+            // Kalau masih seeking (robot putar cari garis setelah belok) →
+            //   set motor pivot sesuai arah seek
+            // Kalau normal/sudah nemu garis →
+            //   set motor PID following
+            if (seeking && !found) {
+                set_motor_seek(cur.motor_l, cur.motor_r);
+            } else {
+                g_LOUT = constrain((int)spd + g_out_p + g_out_d, -255, 255);
+                g_ROUT = constrain((int)spd - g_out_p - g_out_d, -255, 255);
+                set_motors(g_LOUT, g_ROUT, DEFAULT_MAX_PWM);
             }
 
             // ─────────────────────────────────────────
