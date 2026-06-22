@@ -313,7 +313,7 @@ bool eksekusi_decision(CounterParam& p, bool is_mirrored, unsigned long elapsed_
 
                     while (true) {
                         int32_t now = use_left ? encoderKiriRead() : encoderKananRead();
-                        if ((now - start) >= target) break;
+                        if (abs(now - start) >= target) break;
                         led_lcd(true);
                         led_timer((read_timer() / 5) % 2 == 1);
                         scan_sensor();
@@ -483,7 +483,8 @@ uint8_t mode_counter(uint8_t cp_start) {
             // prioritas: Encd_l dulu, kalau 0 pakai Encd_r
             // mirror: swap sisi
 
-            int32_t enc_now = (cur_use_left ? encoderKiriRead() : encoderKananRead()) - enc_counter_start;
+
+            int32_t enc_now = abs((cur_use_left ? encoderKiriRead() : encoderKananRead()) - enc_counter_start);
 
             // ── LED STATUS ──
             bool waktu_habis_led = (cur_tick_target > 0)
@@ -564,7 +565,7 @@ uint8_t mode_counter(uint8_t cp_start) {
                     tick_init  = true;
                 }
                 int32_t tick_now   = nxt_use_left ? encoderKiriRead() : encoderKananRead();
-                int32_t tick_delta = tick_now - tick_start;
+                int32_t tick_delta = abs(tick_now - tick_start); // pastikan abs() agar bisa mundur
 
                 int16_t target = resolve_encd_cur(nxt.Encd_l, nxt.Encd_r);  // ambil nilai yang ada
 
