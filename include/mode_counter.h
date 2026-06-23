@@ -86,6 +86,41 @@ inline int16_t resolve_encd_cur(int16_t encd_l, int16_t encd_r) {
     return 0;
 }
 
+inline bool resolve_enc_belok(int16_t actual_l, int16_t actual_r) {
+    return (abs(actual_l) >= abs(actual_r));  // true = kiri, false = kanan
+}
+
+inline int32_t read_enc_belok(bool use_left) {
+    return use_left ? abs(encoderKiriRead()) : abs(encoderKananRead());
+}
+
+inline void reset_enc_belok(bool use_left) {
+    if (use_left) encoderKiriReset();
+    else          encoderKananReset();
+}
+
+// helper: jalankan motor dengan encoder target
+// set_motors dipanggil caller sebelum masuk sini kalau perlu
+inline void run_until_enc(int16_t actual_l, int16_t actual_r, int16_t encd_b) {
+    bool use_left = resolve_enc_belok(actual_l, actual_r);
+    reset_enc_belok(use_left);
+    int32_t start = read_enc_belok(use_left);
+    while (true) {
+        if (read_enc_belok(use_left) - start >= encd_b) break;
+        set_motors(actual_l, actual_r, DEFAULT_MAX_PWM);
+    }
+}
+
+// Tentukan sisi encoder berdasarkan Encd_l/r dan mirror
+// Default kiri kalau keduanya 0
+inline bool resolve_use_left(int16_t encd_l, int16_t encd_r, bool is_mirrored) {
+    int16_t el = is_mirrored ? encd_r : encd_l;
+    int16_t er = is_mirrored ? encd_l : encd_r;
+    if (el > 0) return true;
+    if (er > 0) return false;
+    return true;  // default kiri
+}
+
 // ─────────────────────────────────────────
 //  FOLLOWING — PID ngikuti garis
 // ─────────────────────────────────────────
@@ -149,22 +184,11 @@ inline void set_motor_seek(int16_t belok_l, int16_t belok_r) {
 // ─────────────────────────────────────────
 void eksekusi_belok(int16_t actual_l, int16_t actual_r, uint16_t delay_ms, int16_t encd_b) {
     if (encd_b > 0 && (actual_l != 0 || actual_r != 0)) {
-        bool use_left = (abs(actual_l) >= abs(actual_r));
-
-        // reset encoder sebelum mulai — hindari nilai lama
-        int32_t start;
-        if (use_left) { encoderKiriReset();  start = encoderKiriRead();  }
-        else          { encoderKananReset(); start = encoderKananRead(); }
-        while (true) {
-            int32_t now = use_left ? abs(encoderKiriRead()) : abs(encoderKananRead());
-            if ((now - start) >= encd_b) break;
-            set_motors(actual_l, actual_r, DEFAULT_MAX_PWM);
-        }
+        run_until_enc(actual_l, actual_r, encd_b);
     } else {
         set_motors(actual_l, actual_r, DEFAULT_MAX_PWM);
         delay(delay_ms);
     }
-
     if      (actual_l > 0 && actual_r < 0) g_flag_cond = 1;
     else if (actual_l < 0 && actual_r > 0) g_flag_cond = 2;
     else                                    g_flag_cond = 0;
@@ -177,25 +201,15 @@ void eksekusi_belok(int16_t actual_l, int16_t actual_r, uint16_t delay_ms, int16
 //  flag_cond = 0 setelah selesai (tidak ada seek)
 // ─────────────────────────────────────────
 void eksekusi_delay_b(int16_t belok_l, int16_t belok_r,
-                      uint16_t delay_ms, bool is_mirrored,
-                      int16_t encd_b) {
+                      uint16_t delay_ms, int16_t encd_b) {
     int16_t actual_l = belok_l;
     int16_t actual_r = belok_r;
-    if (is_mirrored) { int16_t tmp = actual_l; actual_l = actual_r; actual_r = tmp; }
+    mirror_motor(actual_l, actual_r);  // ← pakai helper mirror, hapus is_mirrored param
 
     set_motors(actual_l, actual_r, DEFAULT_MAX_PWM);
 
     if (encd_b > 0) {
-        // encoder mode — outer wheel (abs)
-        bool use_left = (abs(actual_l) >= abs(actual_r));
-        int32_t start;
-        if (use_left) { encoderKiriReset();  start = encoderKiriRead();  }
-        else          { encoderKananReset(); start = encoderKananRead(); }
-        while (true) {
-            int32_t now = use_left ? abs(encoderKiriRead()) : abs(encoderKananRead());
-            if ((now - start) >= encd_b) break;
-            set_motors(actual_l, actual_r, DEFAULT_MAX_PWM);
-        }
+        run_until_enc(actual_l, actual_r, encd_b);
     } else {
         delay(delay_ms);
     }
@@ -236,6 +250,11 @@ inline uint8_t ramp_speed(uint8_t speed1, uint8_t speed2, int t, int timer) {
     return (uint8_t)constrain(spd, 0, 255);
 }
 
+inline void mirror_motor(int16_t& l, int16_t& r) {
+    if (!g_config.mirrored) return;
+    int16_t tmp = l; l = r; r = tmp;
+}
+
 // ─────────────────────────────────────────
 //  EKSEKUSI DECISION
 // ─────────────────────────────────────────
@@ -249,34 +268,28 @@ bool eksekusi_decision(CounterParam& p, bool is_mirrored, unsigned long elapsed_
         case DEC_BELOK_KANAN: {
             int16_t l =  (int16_t)p.motor_l;
             int16_t r = -(int16_t)p.motor_r;
-            if (is_mirrored) { int16_t tmp = l; l = r; r = tmp; }
-            if (p.delay_type == DELAY_A) {
-                eksekusi_belok(l, r, p.delay_ms, p.Encd_b);
-            } else {
-                eksekusi_delay_b(l, r, p.delay_ms, false, p.Encd_b);  // mirror sudah dihandle
-            }
+            mirror_motor(l, r);
+            if (p.delay_type == DELAY_A) eksekusi_belok(l, r, p.delay_ms, p.Encd_b);
+            else                          eksekusi_delay_b(l, r, p.delay_ms, p.Encd_b);
             break;
         }
         case DEC_BELOK_KIRI: {
             int16_t l = -(int16_t)p.motor_l;
             int16_t r =  (int16_t)p.motor_r;
-            if (is_mirrored) { int16_t tmp = l; l = r; r = tmp; }
-            if (p.delay_type == DELAY_A) {
-                eksekusi_belok(l, r, p.delay_ms, p.Encd_b);
-            } else {
-                eksekusi_delay_b(l, r, p.delay_ms, false, p.Encd_b);
-            }
-            break;
+            mirror_motor(l, r);
+            if (p.delay_type == DELAY_A) eksekusi_belok(l, r, p.delay_ms, p.Encd_b);
+            else                          eksekusi_delay_b(l, r, p.delay_ms, p.Encd_b);
+            break;  
         }
 
         case DEC_FREE: {
-            int16_t fl = is_mirrored ? (int16_t)p.motor_r : (int16_t)p.motor_l;
-            int16_t fr = is_mirrored ? (int16_t)p.motor_l : (int16_t)p.motor_r;
+            int16_t fl = (int16_t)p.motor_l;
+            int16_t fr = (int16_t)p.motor_r;
+            mirror_motor(fl, fr);
             int16_t target = resolve_encd(fl, fr, p.Encd_l, p.Encd_r, is_mirrored);
 
             if (p.trigger == TRIGGER_TICK || target > 0) {
-                bool use_left = is_mirrored ? (p.Encd_r > 0 ? false : true)
-                            : (p.Encd_l > 0);
+                bool use_left = resolve_use_left(p.Encd_l, p.Encd_r, is_mirrored);
 
                 int32_t start = use_left ? encoderKiriRead() : encoderKananRead();
 
@@ -307,8 +320,7 @@ bool eksekusi_decision(CounterParam& p, bool is_mirrored, unsigned long elapsed_
                 int16_t target = resolve_encd_cur(p.Encd_l, p.Encd_r);
                 if (target > 0) {
                     // tentukan sisi encoder yang dipakai
-                    bool use_left = (is_mirrored ? p.Encd_r : p.Encd_l) > 0 ||
-                                    (p.Encd_l == 0 && p.Encd_r == 0);
+                    bool use_left = resolve_use_left(p.Encd_l, p.Encd_r, is_mirrored);
                     int32_t start = use_left ? encoderKiriRead() : encoderKananRead();
 
                     while (true) {
@@ -457,7 +469,7 @@ uint8_t mode_counter(uint8_t cp_start) {
         // cur_tick_target = 0 → durasi pakai cur.timer
         // enc_counter_start   → referensi encoder di awal counter ini
         int16_t cur_tick_target   = resolve_encd_cur(cur.Encd_l, cur.Encd_r);
-        bool cur_use_left         = (is_mirrored ? cur.Encd_r : cur.Encd_l) > 0 || (cur.Encd_l == 0 && cur.Encd_r == 0);
+        bool cur_use_left         = resolve_use_left(cur.Encd_l, cur.Encd_r, is_mirrored);
         int32_t enc_counter_start = cur_use_left ? encoderKiriRead() : encoderKananRead();
 
         // ── STATE VARIABEL PER COUNTER ──
@@ -559,7 +571,7 @@ uint8_t mode_counter(uint8_t cp_start) {
             // tick_start diinit sekali saat pertama masuk kondisi ini
             // target > 0 → cek encoder; target == 0 → fallback waktu cur
             } else if (!seeking && nxt.trigger == TRIGGER_TICK) {
-                bool nxt_use_left = (is_mirrored ? nxt.Encd_r : nxt.Encd_l) > 0;
+                bool nxt_use_left = resolve_use_left(nxt.Encd_l, nxt.Encd_r, is_mirrored);
                 if (!tick_init) {
                     tick_start = nxt_use_left ? encoderKiriRead() : encoderKananRead();
                     tick_init  = true;
